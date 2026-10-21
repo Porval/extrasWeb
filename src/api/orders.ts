@@ -28,7 +28,7 @@ export const orderApi = {
     if (!data || !Array.isArray(data.orders) || !Number.isInteger(data.total)) throw new ApiError(502,'订单列表响应异常。')
     return data
   },
-  async manualPayment(id:string,input:{reference:string;description:string;screenshot:ScreenshotInput}) {
+  async manualPayment(id:string,input:{reference:string;description:string;screenshot:ScreenshotInput;previousNoteId?:string}) {
     return orderValue(await request(`/api/orders/${encodeURIComponent(id)}/manual-payment`,input,{},30000))
   },
 }

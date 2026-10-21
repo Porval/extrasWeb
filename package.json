@@ -1,5 +1,5 @@
 {
-  "name": "extras-web", "version": "0.1.0", "private": true, "type": "module",
+  "name": "extras-web", "version": "0.1.1", "private": true, "type": "module",
   "description": "及时达后台前端：手机号验证码登录",
   "engines": { "node": "^22.18.0 || >=24.12.0" },
   "scripts": { "dev": "vite", "build": "vue-tsc --noEmit && vite build", "typecheck": "vue-tsc --noEmit", "preview": "vite preview", "test": "vitest run" },

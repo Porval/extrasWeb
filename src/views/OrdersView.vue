@@ -50,12 +50,12 @@ const date=(value:number)=>new Date(value).toLocaleString('zh-CN',{hour12:false}
       <table class="order-table"><thead><tr><th>服务商 / 人员</th><th>订单进度</th><th>收款 / 审核状态</th><th>商品</th><th>应付金额</th><th>收件信息</th><th>外部订单号</th><th>履约订单号 / 状态</th><th>创建时间</th><th>操作</th></tr></thead>
         <tbody><tr v-for="order in shown" :key="order.id">
           <td>{{ order.providerName }}<br><span>{{ order.operatorName }}</span></td>
-          <td><span class="order-state-pill">{{ orderStage(order) }}</span></td>
-          <td>{{ order.payment.status === 'paid' ? '已收款' : order.payment.status==='submitted' ? '付款信息已提交' : '待付款' }}<br><span>{{ order.review.status === 'approved' ? '审核通过' : order.review.status === 'rejected' ? '审核未通过' : order.review.status === 'pending' ? '待审核' : '尚未提交审核' }}</span></td>
+          <td><span class="order-state-pill" :class="{returned:order.payment.status==='unpaid'&&order.payment.rejection}">{{ orderStage(order) }}</span></td>
+          <td><template v-if="order.payment.status==='unpaid'&&order.payment.rejection"><strong class="payment-returned-label">付款资料已退回</strong><p class="payment-returned-reason">退回原因：{{order.payment.rejection.reason}}</p><span>请核对实际付款记录，修改资料后重提，请勿重复付款。</span></template><template v-else>{{ order.payment.status === 'paid' ? '已收款' : order.payment.status==='submitted' ? '付款信息已提交' : '待付款' }}<br><span>{{ order.review.status === 'approved' ? '审核通过' : order.review.status === 'rejected' ? '审核未通过' : order.review.status === 'pending' ? '待审核' : '尚未提交审核' }}</span></template></td>
           <td><div v-for="(item, index) in order.items" :key="index" class="order-item-identity"><ProductThumbnail :src="item.imageUrl" :name="item.itemName"/><div class="order-item-copy">{{ item.itemName }} <span v-if="item.spec">{{ item.spec }}</span> × {{ item.quantity }}</div></div></td>
           <td>{{ money(order.payPrice) }}</td><td class="contacts-cell">{{ order.contacts }}</td><td>{{ order.referenceId || '—' }}</td>
           <td>{{ order.external.timelyOrderId || '审核通过后关联' }}<br><span>{{ order.fulfillment.sourceStatus || fulfillmentLabels[order.fulfillment.status] }}</span><FulfillmentInfo v-if="order.external.status==='created'" :fulfillment="order.fulfillment" compact/><span v-if="order.fulfillment.syncMessage">{{order.fulfillment.syncMessage}}</span></td>
-          <td>{{ date(order.createdAt) }}</td><td><RouterLink class="table-link" :to="{ name: 'order-detail', params: { id: order.id } }">{{ order.payment.status === 'unpaid' ? '去付款' : '查看进度' }}</RouterLink></td>
+          <td>{{ date(order.createdAt) }}</td><td><RouterLink class="table-link" :to="{ name: 'order-detail', params: { id: order.id } }">{{ order.payment.status === 'unpaid' ? order.payment.rejection ? '修改付款资料' : '去付款' : '查看进度' }}</RouterLink></td>
         </tr></tbody>
       </table>
       <div v-if="!shown.length" class="order-empty"><span aria-hidden="true">▱</span><p>{{loading?'正在加载订单…':'暂无符合条件的订单'}}</p></div>
