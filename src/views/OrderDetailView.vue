@@ -78,7 +78,7 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
 
       <div v-if="!quotePending" class="detail-columns">
         <section class="detail-card payment-card"><header><h2>手动付款信息</h2><span class="detail-badge" :class="{complete:order.payment.status==='paid',returned:paymentReturned}">{{ order.payment.status === 'paid' ? '已确认到账' : currentStage }}</span></header>
-          <dl class="detail-fields"><dt>服务商</dt><dd>{{order.providerName}}</dd><dt>建单人员</dt><dd>{{order.operatorName}}</dd><dt>付款人员</dt><dd>{{order.payment.payerName||auth.session.value?.account.personName}}</dd><dt>收款时间</dt><dd>{{date(order.payment.paidAt)}}</dd></dl>
+          <dl class="detail-fields"><dt>服务商</dt><dd>{{order.providerName}}</dd><dt>建单人员</dt><dd>{{order.operatorName}}</dd><dt>付款人员</dt><dd>{{order.payment.payerName||auth.session.value?.account.personName}}</dd><dt>{{order.payment.confirmedAt ? '确认到账时间' : '收款时间'}}</dt><dd>{{date(order.payment.confirmedAt ?? order.payment.paidAt)}}</dd></dl>
           <div v-if="paymentReturned&&order.payment.rejection" class="payment-returned-notice" role="status">
             <strong>付款资料已退回</strong><p>退回原因：{{order.payment.rejection.reason}}</p>
             <p>请核对实际付款记录，修改资料后重新提交。本次只更新付款资料，请勿重复付款。</p>

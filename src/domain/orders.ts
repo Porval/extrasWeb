@@ -32,7 +32,7 @@ export interface TimelyOrder extends NewOrder {
   cityName: string
   brandName: string
   platformName: string
-  payment: { screenshot?:{id:string;contentType:string;size:number;sha256:string;uploadedAt:number}; status: 'unpaid' | 'submitted' | 'paid'; noteId?: string; previousNoteId?: string; rejection?:PaymentRejection; rejections?:PaymentRejection[]; reference?: string; description?: string; submittedAt?: number; paidAt?: number; payerId?: string; payerName?: string }
+  payment: { screenshot?:{id:string;contentType:string;size:number;sha256:string;uploadedAt:number}; status: 'unpaid' | 'submitted' | 'paid'; noteId?: string; previousNoteId?: string; rejection?:PaymentRejection; rejections?:PaymentRejection[]; reference?: string; description?: string; submittedAt?: number; paidAt?: number; confirmedAt?: number; payerId?: string; payerName?: string }
   review: { status: 'not_submitted' | 'pending' | 'approved' | 'rejected'; resultId?: string; reviewerName?: string; reviewedAt?: number; reason?: string }
   external: { status: 'not_created' | 'queued' | 'creating' | 'retry' | 'attention' | 'created'; message?: string; timelyOrderId?: string; createdAt?: number }
   fulfillment: FulfillmentState
