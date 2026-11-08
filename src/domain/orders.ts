@@ -3,6 +3,7 @@ export interface DeliveryInfo { id:string; channel:string; orderNo:string; statu
 export interface FulfillmentState { status:'not_started'|'waiting'|'accepted'|'delivering'|'delivered'; updatedAt?:number; sourceCode?:number; sourceStatus?:string; sourceUpdatedAt?:number; hungup?:boolean; errorOrder?:boolean; errorMessage?:string; syncMessage?:string; syncedAt?:number; messages?:string; memos?:FulfillmentMemo[]; deliveries?:DeliveryInfo[] }
 export interface Option { id: string; name: string }
 export interface OrderOptions { cities: Option[]; brands: Option[]; platforms: Option[] }
+export interface OrderConfiguration extends OrderOptions { demo: boolean; requiresQuote?: boolean }
 export interface OrderItem { itemName: string; spec: string; salesPrice: number; quantity: number; upc?:string; catalogId?:string; imageUrl?:string }
 export interface NewOrder {
   cityId: string
@@ -12,14 +13,17 @@ export interface NewOrder {
   contacts: string
   messages: string
   referenceId: string
-  payPrice: number
+  payPrice?: number
   arrivedTime: number
 }
 export type FulfillmentStatus = 'not_started' | 'waiting' | 'accepted' | 'delivering' | 'delivered'
-export type OrderStage = '付款资料已退回' | '待付款' | '待收款确认' | '已收款待审核' | '审核未通过' | '审核通过待建单' | '待履约' | '履约中' | '已完成' | '已退款' | '履约异常' | '已挂起'
+export type OrderStage = '待报价' | '付款资料已退回' | '待付款' | '待收款确认' | '已收款待审核' | '审核未通过' | '审核通过待建单' | '待履约' | '履约中' | '已完成' | '已退款' | '履约异常' | '已挂起'
 export interface OrderEvent { id: string; time: number; title: string; description: string }
 export interface PaymentRejection { noteId:string; reason:string; reviewerName:string; rejectedAt:number }
+export type OrderQuote = { status: 'pending' } | { status: 'quoted'; amount: number; note: string; quotedAt: number; quotedBy: string }
 export interface TimelyOrder extends NewOrder {
+  payPrice: number
+  quote?: OrderQuote
   id: string
   createdAt: number
   ownerId: string
@@ -38,6 +42,7 @@ export const fulfillmentLabels: Record<FulfillmentStatus, string> = {
   not_started: '审核通过后启动', waiting: '待接单', accepted: '已接单', delivering: '配送中', delivered: '已送达',
 }
 export function orderStage(order: TimelyOrder): OrderStage {
+  if (order.quote?.status === 'pending') return '待报价'
   if (order.payment.status === 'submitted') return '待收款确认'
   if (order.payment.status === 'unpaid') return order.payment.rejection ? '付款资料已退回' : '待付款'
   if (order.review.status === 'rejected') return '审核未通过'

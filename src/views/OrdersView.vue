@@ -12,13 +12,14 @@ const today=localDate(Date.now())
 const filters=reactive({date:today,contacts:'',reference:'',item:''})
 const applied=ref({...filters})
 const status=ref('全部')
-const statuses=['全部','待付款','待收款确认','已收款待审核','审核未通过','审核通过待建单','待履约','履约中','已完成','已退款','履约异常','已挂起']
+const quoteSupported=ref(false)
+const statuses=computed(()=>['全部',...(quoteSupported.value?['待报价']:[]),'待付款','待收款确认','已收款待审核','审核未通过','审核通过待建单','待履约','履约中','已完成','已退款','履约异常','已挂起'])
 const page=ref(1),pageSize=ref(10),shown=ref<TimelyOrder[]>([]),total=ref(0),loading=ref(false),error=ref('')
 const pages=computed(()=>Math.max(1,Math.ceil(total.value/pageSize.value)))
 let epoch=0,timer:ReturnType<typeof setInterval>|undefined
 async function load(){
   const started=++epoch,owner=auth.session.value?.account.id;loading.value=true
-  try{const data=await orderApi.list({...applied.value,stage:status.value==='全部'?'':status.value,page:page.value,pageSize:pageSize.value});if(started===epoch&&owner===auth.session.value?.account.id){shown.value=data.orders;total.value=data.total;error.value=''}}
+  try{const data=await orderApi.list({...applied.value,stage:status.value==='全部'?'':status.value,page:page.value,pageSize:pageSize.value});if(started===epoch&&owner===auth.session.value?.account.id){shown.value=data.orders;total.value=data.total;error.value='';if(typeof data.requiresQuote==='boolean'||data.orders.some(order=>order.quote))quoteSupported.value=true}}
   catch(e){if(started===epoch)error.value=e instanceof Error?e.message:'订单加载失败'}
   finally{if(started===epoch)loading.value=false}
 }
@@ -33,8 +34,8 @@ const date=(value:number)=>new Date(value).toLocaleString('zh-CN',{hour12:false}
 </script>
 <template>
   <section class="admin-page orders-page">
-    <div class="admin-page-heading"><div><h1>{{ auth.session.value?.account.providerName }} - 及时达订单</h1><span>手动建单付款 · 管理端审核 · 查看履约</span></div></div>
-    <p class="preview-note">订单已存入后台数据库。手动付款后提交付款信息，由管理端核对收款并审核；审核通过后自动建单。</p><p v-if="error" class="admin-error" role="alert">{{error}}</p>
+    <div class="admin-page-heading"><div><h1>{{ auth.session.value?.account.providerName }} - 及时达订单</h1><span>{{quoteSupported?'手动建单 · 管理端报价 · 付款审核 · 查看履约':'手动建单付款 · 管理端审核 · 查看履约'}}</span></div></div>
+    <p v-if="quoteSupported" class="preview-note">待报价的订单会在报价完成后进入待付款，列表自动刷新。付款后提交资料，由管理端核对收款并审核。</p><p v-else class="preview-note">订单已存入后台数据库。手动付款后提交付款信息，由管理端核对收款并审核；审核通过后自动建单。</p><p v-if="error" class="admin-error" role="alert">{{error}}</p>
     <div class="order-identity-strip"><span>服务商：<strong>{{ auth.session.value?.account.providerName }}</strong></span><span>创建 / 付款人员：<strong>{{ auth.session.value?.account.personName }}</strong></span><span>当前账号的订单</span></div>
     <form class="order-filters" @submit.prevent="applyFilters">
       <input v-model="filters.date" type="date" aria-label="订单日期" @change="applyFilters">
@@ -51,11 +52,11 @@ const date=(value:number)=>new Date(value).toLocaleString('zh-CN',{hour12:false}
         <tbody><tr v-for="order in shown" :key="order.id">
           <td>{{ order.providerName }}<br><span>{{ order.operatorName }}</span></td>
           <td><span class="order-state-pill" :class="{returned:order.payment.status==='unpaid'&&order.payment.rejection}">{{ orderStage(order) }}</span></td>
-          <td><template v-if="order.payment.status==='unpaid'&&order.payment.rejection"><strong class="payment-returned-label">付款资料已退回</strong><p class="payment-returned-reason">退回原因：{{order.payment.rejection.reason}}</p><span>请核对实际付款记录，修改资料后重提，请勿重复付款。</span></template><template v-else>{{ order.payment.status === 'paid' ? '已收款' : order.payment.status==='submitted' ? '付款信息已提交' : '待付款' }}<br><span>{{ order.review.status === 'approved' ? '审核通过' : order.review.status === 'rejected' ? '审核未通过' : order.review.status === 'pending' ? '待审核' : '尚未提交审核' }}</span></template></td>
+          <td><span v-if="order.quote?.status==='pending'">等待管理端报价</span><template v-else-if="order.payment.status==='unpaid'&&order.payment.rejection"><strong class="payment-returned-label">付款资料已退回</strong><p class="payment-returned-reason">退回原因：{{order.payment.rejection.reason}}</p><span>请核对实际付款记录，修改资料后重提，请勿重复付款。</span></template><template v-else>{{ order.payment.status === 'paid' ? '已收款' : order.payment.status==='submitted' ? '付款信息已提交' : order.quote?.status==='quoted' ? '已报价，待付款' : '待付款' }}<br><span>{{ order.review.status === 'approved' ? '审核通过' : order.review.status === 'rejected' ? '审核未通过' : order.review.status === 'pending' ? '待审核' : '尚未提交审核' }}</span></template></td>
           <td><div v-for="(item, index) in order.items" :key="index" class="order-item-identity"><ProductThumbnail :src="item.imageUrl" :name="item.itemName"/><div class="order-item-copy">{{ item.itemName }} <span v-if="item.spec">{{ item.spec }}</span> × {{ item.quantity }}</div></div></td>
-          <td>{{ money(order.payPrice) }}</td><td class="contacts-cell">{{ order.contacts }}</td><td>{{ order.referenceId || '—' }}</td>
+          <td><template v-if="order.quote?.status==='pending'">—</template><template v-else>{{ money(order.payPrice) }}<div v-if="order.quote?.status==='quoted'" class="quote-list-info"><span>报价时间：{{date(order.quote.quotedAt)}}</span><p v-if="order.quote.note">{{order.quote.note}}</p></div></template></td><td class="contacts-cell">{{ order.contacts }}</td><td>{{ order.referenceId || '—' }}</td>
           <td>{{ order.external.timelyOrderId || '审核通过后关联' }}<br><span>{{ order.fulfillment.sourceStatus || fulfillmentLabels[order.fulfillment.status] }}</span><FulfillmentInfo v-if="order.external.status==='created'" :fulfillment="order.fulfillment" compact/><span v-if="order.fulfillment.syncMessage">{{order.fulfillment.syncMessage}}</span></td>
-          <td>{{ date(order.createdAt) }}</td><td><RouterLink class="table-link" :to="{ name: 'order-detail', params: { id: order.id } }">{{ order.payment.status === 'unpaid' ? order.payment.rejection ? '修改付款资料' : '去付款' : '查看进度' }}</RouterLink></td>
+          <td>{{ date(order.createdAt) }}</td><td><RouterLink class="table-link" :to="{ name: 'order-detail', params: { id: order.id } }">{{ order.quote?.status==='pending' ? '查看订单' : order.payment.status==='unpaid' ? order.payment.rejection ? '修改付款资料' : order.quote?.status==='quoted' ? '查看报价并付款' : '去付款' : '查看进度' }}</RouterLink></td>
         </tr></tbody>
       </table>
       <div v-if="!shown.length" class="order-empty"><span aria-hidden="true">▱</span><p>{{loading?'正在加载订单…':'暂无符合条件的订单'}}</p></div>

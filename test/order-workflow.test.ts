@@ -18,4 +18,17 @@ describe('持久化订单接口',()=>{
     const url=new URL(fetcher.mock.calls[0]?.[0],'http://localhost');expect(url.searchParams.get('page')).toBe('2');expect(url.searchParams.get('stage')).toBe('已收款待审核')
     await expect(orderApi.get('broken')).rejects.toThrow('订单响应异常')
   })
+  it('保留列表报价能力与报价详情，拒绝报价和实付金额不一致的响应',async()=>{
+    const pending={...saved,payPrice:0,quote:{status:'pending'},payment:{status:'unpaid'}}
+    const quoted={...pending,payPrice:2588,quote:{status:'quoted',amount:2588,note:'含配送费',quotedAt:1794100002000,quotedBy:'报价人'}}
+    const response=(data:unknown)=>({ok:true,status:200,json:async()=>data})
+    const fetcher=vi.fn()
+      .mockResolvedValueOnce(response({orders:[pending],total:1,requiresQuote:false}))
+      .mockResolvedValueOnce(response({order:quoted}))
+      .mockResolvedValueOnce(response({order:{...quoted,payPrice:100}}))
+    vi.stubGlobal('fetch',fetcher)
+    await expect(orderApi.list({stage:'待报价'})).resolves.toMatchObject({requiresQuote:false,orders:[pending]})
+    await expect(orderApi.get(saved.id)).resolves.toMatchObject(quoted)
+    await expect(orderApi.get(saved.id)).rejects.toThrow('报价响应异常')
+  })
 })

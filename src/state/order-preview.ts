@@ -29,8 +29,9 @@ export function addPreviewOrder(input: NewOrder) {
     throw new Error('请选择有效的城市、品牌及平台。')
   }
   if (input.referenceId && previewOrders.value.some(order => order.referenceId === input.referenceId)) throw new Error('预览列表中已存在此外部订单号。')
+  if (input.payPrice === undefined) throw new Error('预览订单需要填写应付金额。')
   const order: TimelyOrder = {
-    ...structuredClone(input), id: crypto.randomUUID(), createdAt: Date.now(), ownerId: account.id,
+    ...structuredClone(input), payPrice: input.payPrice, id: crypto.randomUUID(), createdAt: Date.now(), ownerId: account.id,
     operatorName: account.personName, providerName: account.providerName,
     cityName: name('cities', input.cityId), brandName: name('brands', input.brandId), platformName: name('platforms', input.plateId),
     payment: { status: 'unpaid' }, review: { status: 'not_submitted' }, external: { status: 'not_created' }, fulfillment: { status: 'not_started' }, events: [],

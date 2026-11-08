@@ -10,6 +10,9 @@ import { fulfillmentLabels, orderStage } from '../domain/orders'
 import { encodePaymentScreenshot, validatePaymentScreenshot } from '../domain/payment-screenshot'
 import type { TimelyOrder } from '../domain/orders'
 const route=useRoute(),router=useRouter(),order=ref<TimelyOrder>(),loading=ref(true),saving=ref(false),error=ref('')
+const quotePending=computed(()=>order.value?.quote?.status==='pending')
+const canSubmitPayment=computed(()=>!quotePending.value&&(order.value?.payment.status==='unpaid'||(order.value?.payment.status==='submitted'&&!order.value.payment.screenshot)))
+const flowLabels=computed(()=>['手工建单',...(order.value?.quote?['管理端报价']:[]),'手动付款','收款审核','创建履约','查看履约'])
 const paymentDraft=reactive({reference:'',description:''})
 const paymentDraftDirty=ref(false)
 const paymentReturned=computed(()=>order.value?.payment.status==='unpaid'&&Boolean(order.value.payment.rejection))
@@ -34,12 +37,19 @@ function selectScreenshot(event:Event){
   catch(e){input.value='';error.value=e instanceof Error?e.message:'请选择有效图片'}
 }
 const reviewLabel=computed(()=>!order.value?'':paymentReturned.value?'付款资料已退回':order.value.payment.status==='submitted'?'待收款确认':({not_submitted:'待付款信息',pending:'已收款待审核',approved:'审核通过',rejected:'审核未通过'}[order.value.review.status]))
-const step=computed(()=>{if(!order.value||order.value.payment.status==='unpaid')return 1;if(order.value.review.status!=='approved')return 2;if(order.value.external.status!=='created')return 3;return order.value.fulfillment.status==='delivered'?5:4})
+const step=computed(()=>{
+  if (!order.value || quotePending.value) return 1
+  const offset=order.value.quote?1:0
+  if (order.value.payment.status==='unpaid') return offset+1
+  if (order.value.review.status!=='approved') return offset+2
+  if (order.value.external.status!=='created') return offset+3
+  return offset+(order.value.fulfillment.status==='delivered'?5:4)
+})
 let epoch=0,timer:ReturnType<typeof setInterval>|undefined
 const date=(value?:number)=>value?new Date(value).toLocaleString('zh-CN',{hour12:false}):'—'
 async function load(){const started=++epoch,owner=auth.session.value?.account.id;try{const data=await orderApi.get(String(route.params.id));if(started===epoch&&owner===auth.session.value?.account.id){acceptOrder(data);error.value=''}}catch(e){if(started===epoch)error.value=e instanceof Error?e.message:'订单读取失败'}finally{if(started===epoch)loading.value=false}}
 async function submitPayment(){
-  if(!order.value||saving.value)return
+  if(!order.value||saving.value||!canSubmitPayment.value)return
   if(!paymentDraft.reference.trim()){error.value='请填写手动付款流水号。';return}
   if(!screenshotFile.value){error.value=paymentReturned.value?'请重新选择付款截图后再提交。':'请上传付款截图。';return}
   const current=order.value,file=screenshotFile.value
@@ -54,12 +64,18 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
 <template>
   <section class="admin-page order-detail-page">
     <div class="admin-page-heading"><div class="form-title"><RouterLink :to="{ name: 'orders' }" aria-label="返回订单列表">←</RouterLink><h1>订单详情与履约</h1></div><RouterLink class="plain-button" :to="{ name: 'orders' }">返回列表</RouterLink></div>
-    <p class="preview-note">仅支持手动建单和手动付款。付款资料提交后，由已有管理端确认到账并审核；审核通过后，本后台调用履约系统建单。</p><p v-if="error" class="admin-error" role="alert">{{error}}</p>
+    <p v-if="order?.quote" class="preview-note">管理端报价后，按报价金额手动付款并提交付款资料；收款核对、审核与履约进度会继续在此更新。</p><p v-else class="preview-note">仅支持手动建单和手动付款。付款资料提交后，由已有管理端确认到账并审核；审核通过后，本后台调用履约系统建单。</p><p v-if="error" class="admin-error" role="alert">{{error}}</p>
     <template v-if="order">
-      <ol class="order-flow" aria-label="订单处理流程"><li v-for="(label, index) in ['手工建单', '手动付款', '收款审核', '创建履约', '查看履约']" :key="label" :class="{ done: index < step, current: index === step }" :aria-current="index === step ? 'step' : undefined"><span>{{ index < step ? '✓' : index + 1 }}</span><strong>{{ label }}</strong></li></ol>
-      <div class="order-overview"><div><p class="detail-eyebrow">{{ order.providerName }} · {{ order.operatorName }}</p><h2>外部订单号 {{ order.referenceId || '未填写' }}</h2><p>结算订单号：{{ order.id }}</p></div><div class="order-amount"><span>订单应付金额</span><strong>{{ money(order.payPrice) }}</strong><span class="order-state-pill" :class="{returned:paymentReturned}">{{ orderStage(order) }}</span></div></div>
+      <ol class="order-flow" :class="{'has-quote':order.quote}" aria-label="订单处理流程"><li v-for="(label, index) in flowLabels" :key="label" :class="{ done: index < step, current: index === step }" :aria-current="index === step ? 'step' : undefined"><span>{{ index < step ? '✓' : index + 1 }}</span><strong>{{ label }}</strong></li></ol>
+      <div class="order-overview"><div><p class="detail-eyebrow">{{ order.providerName }} · {{ order.operatorName }}</p><h2>外部订单号 {{ order.referenceId || '未填写' }}</h2><p>结算订单号：{{ order.id }}</p></div><div class="order-amount"><span>订单应付金额</span><strong v-if="!quotePending">{{ money(order.payPrice) }}</strong><strong v-else>—</strong><span class="order-state-pill" :class="{returned:paymentReturned}">{{ orderStage(order) }}</span></div></div>
 
-      <div class="detail-columns">
+      <section v-if="order.quote" class="detail-card quote-card" aria-label="管理端报价" aria-live="polite">
+        <header><h2>管理端报价</h2><span class="detail-badge" :class="{complete:!quotePending}">{{quotePending?'待报价':'已报价'}}</span></header>
+        <p v-if="order.quote.status==='pending'" class="review-pending">订单已提交。报价完成后，此处会显示应付金额和付款入口。</p>
+        <dl v-else class="detail-fields"><dt>报价时间</dt><dd>{{date(order.quote.quotedAt)}}</dd><dt>报价人员</dt><dd>{{order.quote.quotedBy}}</dd><dt>报价备注</dt><dd class="quote-note">{{order.quote.note||'—'}}</dd></dl>
+      </section>
+
+      <div v-if="!quotePending" class="detail-columns">
         <section class="detail-card payment-card"><header><h2>手动付款信息</h2><span class="detail-badge" :class="{complete:order.payment.status==='paid',returned:paymentReturned}">{{paymentReturned?'付款资料已退回':order.payment.status==='paid'?'已确认收款':order.payment.status==='submitted'?'待核对到账':'待付款'}}</span></header>
           <dl class="detail-fields"><dt>服务商</dt><dd>{{order.providerName}}</dd><dt>建单人员</dt><dd>{{order.operatorName}}</dd><dt>付款人员</dt><dd>{{order.payment.payerName||auth.session.value?.account.personName}}</dd><dt>收款时间</dt><dd>{{date(order.payment.paidAt)}}</dd></dl>
           <div v-if="paymentReturned&&order.payment.rejection" class="payment-returned-notice" role="status">
@@ -72,9 +88,9 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
             <dl class="detail-fields"><dt>付款流水号</dt><dd>{{order.payment.reference||'未填写'}}</dd><dt>付款说明</dt><dd>{{order.payment.description||'无'}}</dd><dt>提交时间</dt><dd>{{date(order.payment.submittedAt)}}</dd></dl>
             <a v-if="screenshotUrl" :href="screenshotUrl" target="_blank" rel="noopener" class="payment-screenshot-link"><img :src="screenshotUrl" alt="上次提交的付款截图（仅供核对）"><span>查看上次付款截图原图 ↗</span></a>
           </section>
-          <form v-if="order.payment.status==='unpaid'||(order.payment.status==='submitted'&&!order.payment.screenshot)" class="manual-payment-form" @submit.prevent="submitPayment">
+          <form v-if="canSubmitPayment" class="manual-payment-form" @submit.prevent="submitPayment">
             <p v-if="paymentReturned" class="detail-help">核对上次资料后，可修改流水号和说明，并重新选择清晰的付款截图。旧截图只作参考，不会用于本次重新提交。</p>
-            <p v-else class="detail-help">请按约定渠道手动付款，付款后填写流水号并上传付款截图，供管理端核对。提交资料不会将订单标记为已收款。</p>
+            <p v-else class="detail-help">请按约定渠道手动付款<template v-if="order.quote">，金额以管理端报价为准</template>。付款后填写流水号并上传付款截图，供管理端核对。提交资料不会将订单标记为已收款。</p>
             <label>付款流水号<input v-model="paymentDraft.reference" aria-label="付款流水号" maxlength="120" placeholder="填写银行或支付平台流水号" :readonly="order.payment.status==='submitted'" :disabled="saving" @input="markPaymentDraftEdited"></label>
             <label>{{paymentReturned?'重新选择付款截图':'付款截图'}} <span class="required-mark">*</span><input type="file" required aria-label="付款截图" accept="image/jpeg,image/png,image/webp" :disabled="saving" @change="selectScreenshot"></label>
             <p class="detail-help">支持 JPG、PNG、WebP，单张不超过 5 MB，请确保金额、时间和流水号清晰。</p>
@@ -90,8 +106,8 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
           <template v-else><dl class="detail-fields"><dt>履约订单号</dt><dd>{{ order.external.timelyOrderId }}</dd><dt>当前状态</dt><dd>{{order.fulfillment.sourceStatus||fulfillmentLabels[order.fulfillment.status]}}</dd><dt>最近更新</dt><dd>{{ date(order.fulfillment.updatedAt) }}</dd><dt>最近同步</dt><dd>{{ date(order.fulfillment.syncedAt) }}</dd></dl><FulfillmentInfo :fulfillment="order.fulfillment"/><p class="detail-help">后台定时同步配送订单状态、履约备注及配送信息。</p><p v-if="order.fulfillment.syncMessage" class="detail-help">{{order.fulfillment.syncMessage}}</p><p v-if="order.fulfillment.status==='delivered'" class="fulfillment-complete" role="status">✓ 订单已送达。</p></template>
         </section>
       </div>
-      <section class="detail-card review-card"><header><h2>管理端收款审核</h2><span class="detail-badge" :class="{complete:order.review.status==='approved'}">{{reviewLabel}}</span></header><dl class="detail-fields"><dt>审核人员</dt><dd>{{order.review.reviewerName||'—'}}</dd><dt>审核时间</dt><dd>{{date(order.review.reviewedAt)}}</dd><dt>审核说明</dt><dd>{{order.review.reason||'—'}}</dd><dt>履约订单号</dt><dd>{{order.external.timelyOrderId||'审核通过后创建'}}</dd></dl><p v-if="order.review.status==='pending'" class="review-pending" role="status">已确认收款，等待管理端审核结果。发起方不能自行审核。</p><p v-if="order.review.status==='rejected'" class="review-rejected" role="status">审核未通过：{{order.review.reason||'请联系管理端核实'}}。此状态不会自动退款或要求再次付款。</p><p v-if="order.review.status==='approved'&&order.external.status!=='created'" class="review-pending" role="status">{{order.external.message||'审核通过，等待后台完成履约建单。'}}</p><p class="detail-help">由已有管理端通过接口写入收款及审核结果，Web 仅展示。</p></section>
-      <section class="detail-card"><header><h2>订单信息</h2><span>{{ order.platformName }}</span></header><dl class="detail-fields order-info-fields"><dt>城市 / 品牌</dt><dd>{{ order.cityName }} / {{ order.brandName }}</dd><dt>收件信息</dt><dd>{{ order.contacts }}</dd><dt>用户备注</dt><dd>{{ order.messages || '无' }}</dd><dt>送达时限</dt><dd>{{ order.arrivedTime }} 分钟</dd><dt>创建时间</dt><dd>{{ date(order.createdAt) }}</dd></dl><ul class="detail-items"><li v-for="(item, index) in order.items" :key="index"><div class="order-item-identity"><ProductThumbnail :src="item.imageUrl" :name="item.itemName"/><div class="order-item-copy"><strong>{{ item.itemName }}</strong><span>{{ item.spec || '无规格' }}<template v-if="item.upc"> · UPC：{{item.upc}}</template></span></div></div><span>{{ money(item.salesPrice) }} × {{ item.quantity }}</span><strong>{{ money(item.salesPrice * item.quantity) }}</strong></li></ul></section>
+      <section v-if="!quotePending" class="detail-card review-card"><header><h2>管理端收款审核</h2><span class="detail-badge" :class="{complete:order.review.status==='approved'}">{{reviewLabel}}</span></header><dl class="detail-fields"><dt>审核人员</dt><dd>{{order.review.reviewerName||'—'}}</dd><dt>审核时间</dt><dd>{{date(order.review.reviewedAt)}}</dd><dt>审核说明</dt><dd>{{order.review.reason||'—'}}</dd><dt>履约订单号</dt><dd>{{order.external.timelyOrderId||'审核通过后创建'}}</dd></dl><p v-if="order.review.status==='pending'" class="review-pending" role="status">已确认收款，等待管理端审核结果。发起方不能自行审核。</p><p v-if="order.review.status==='rejected'" class="review-rejected" role="status">审核未通过：{{order.review.reason||'请联系管理端核实'}}。此状态不会自动退款或要求再次付款。</p><p v-if="order.review.status==='approved'&&order.external.status!=='created'" class="review-pending" role="status">{{order.external.message||'审核通过，等待后台完成履约建单。'}}</p><p class="detail-help">由已有管理端通过接口写入收款及审核结果，Web 仅展示。</p></section>
+      <section class="detail-card"><header><h2>订单信息</h2><span>{{ order.platformName }}</span></header><dl class="detail-fields order-info-fields"><dt>城市 / 品牌</dt><dd>{{ order.cityName }} / {{ order.brandName }}</dd><dt>收件信息</dt><dd>{{ order.contacts }}</dd><dt>用户备注</dt><dd>{{ order.messages || '无' }}</dd><dt>送达时限</dt><dd>{{ order.arrivedTime }} 分钟</dd><dt>创建时间</dt><dd>{{ date(order.createdAt) }}</dd></dl><ul class="detail-items"><li v-for="(item, index) in order.items" :key="index"><div class="order-item-identity"><ProductThumbnail :src="item.imageUrl" :name="item.itemName"/><div class="order-item-copy"><strong>{{ item.itemName }}</strong><span>{{ item.spec || '无规格' }}<template v-if="item.upc"> · UPC：{{item.upc}}</template></span></div></div><span>{{ order.quote ? '参考单价 ' : '' }}{{ money(item.salesPrice) }} × {{ item.quantity }}</span><strong>{{ money(item.salesPrice * item.quantity) }}</strong></li></ul></section>
       <section class="detail-card event-card"><header><h2>订单进度记录</h2><span>后台订单记录</span></header><ol class="order-events"><li v-for="event in order.events" :key="event.id"><time>{{ date(event.time) }}</time><div><strong>{{ event.title }}</strong><p>{{ event.description }}</p></div></li></ol></section>
     </template>
     <div v-else class="order-empty"><p>{{loading?'正在读取订单…':'当前账号下不存在此订单。'}}</p><RouterLink class="mint-button" :to="{ name: 'create-order' }">新建订单</RouterLink></div>
