@@ -15,7 +15,7 @@ describe('商品库选品',()=>{it('按 UPC 搜索后带入商品，参考价保
   expect(api.products).toHaveBeenCalledWith('001234567890',1)
   await wrapper.get('.product-results button').trigger('click')
   expect((wrapper.get('[aria-label="商品 1 名称"]').element as HTMLInputElement).value).toBe('测试洁面')
-  expect((wrapper.get('[aria-label="商品 1 单价"]').element as HTMLInputElement).value).toBe('12.34')
+  expect((wrapper.get('[aria-label="商品 1 商品原价"]').element as HTMLInputElement).value).toBe('12.34')
   expect(wrapper.text()).toContain('UPC：001234567890')
   expect((wrapper.get('[aria-label="订单平台"]').element as HTMLSelectElement).value).toBe('platform')
   await wrapper.get('.product-results button').trigger('click');expect((wrapper.get('[aria-label="商品 1 数量"]').element as HTMLInputElement).value).toBe('2')

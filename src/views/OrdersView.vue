@@ -12,22 +12,34 @@ const today=localDate(Date.now())
 const filters=reactive({date:today,contacts:'',reference:'',item:''})
 const applied=ref({...filters})
 const status=ref('全部')
-const quoteSupported=ref(false)
+const quoteSupported=ref(false),pendingQuoteCount=ref(0)
 const statuses=computed(()=>['全部',...(quoteSupported.value?['待报价']:[]),'待付款','待收款确认','已收款待审核','审核未通过','审核通过待建单','待履约','履约中','已完成','已退款','履约异常','已挂起'])
 const page=ref(1),pageSize=ref(10),shown=ref<TimelyOrder[]>([]),total=ref(0),loading=ref(false),error=ref('')
 const pages=computed(()=>Math.max(1,Math.ceil(total.value/pageSize.value)))
-let epoch=0,timer:ReturnType<typeof setInterval>|undefined
+let epoch=0,quoteEpoch=0,timer:ReturnType<typeof setInterval>|undefined
+async function loadPendingQuotes(){
+  const started=++quoteEpoch,owner=auth.session.value?.account.id
+  try{
+    const data=await orderApi.list({stage:'待报价',page:1,pageSize:1})
+    if(started===quoteEpoch&&owner===auth.session.value?.account.id){
+      const supported=typeof data.requiresQuote==='boolean'||data.orders.some(order=>order.quote)
+      if(supported)quoteSupported.value=true
+      pendingQuoteCount.value=supported?data.total:0
+    }
+  }catch{if(started===quoteEpoch&&owner===auth.session.value?.account.id)pendingQuoteCount.value=0}
+}
 async function load(){
   const started=++epoch,owner=auth.session.value?.account.id;loading.value=true
   try{const data=await orderApi.list({...applied.value,stage:status.value==='全部'?'':status.value,page:page.value,pageSize:pageSize.value});if(started===epoch&&owner===auth.session.value?.account.id){shown.value=data.orders;total.value=data.total;error.value='';if(typeof data.requiresQuote==='boolean'||data.orders.some(order=>order.quote))quoteSupported.value=true}}
   catch(e){if(started===epoch)error.value=e instanceof Error?e.message:'订单加载失败'}
   finally{if(started===epoch)loading.value=false}
+  void loadPendingQuotes()
 }
 function applyFilters(){applied.value={...filters};if(page.value!==1)page.value=1;else void load()}
 function resetFilters(){Object.assign(filters,{date:today,contacts:'',reference:'',item:''});status.value='全部';applyFilters()}
 watch([status,pageSize],()=>{if(page.value!==1)page.value=1;else void load()})
 watch(page,()=>void load())
-watch(()=>auth.session.value?.account.id,()=>{epoch++;shown.value=[];total.value=0})
+watch(()=>auth.session.value?.account.id,()=>{epoch++;quoteEpoch++;shown.value=[];total.value=0;pendingQuoteCount.value=0;quoteSupported.value=false})
 onMounted(()=>{void load();timer=setInterval(()=>{if(!document.hidden)void load()},15000)})
 onUnmounted(()=>{epoch++;clearInterval(timer)})
 const date=(value:number)=>new Date(value).toLocaleString('zh-CN',{hour12:false})
@@ -44,7 +56,7 @@ const date=(value:number)=>new Date(value).toLocaleString('zh-CN',{hour12:false}
       <div class="search-field"><input v-model="filters.item" aria-label="商品信息筛选" placeholder="请输入商品信息"><button type="submit" aria-label="搜索商品">⌕</button></div>
     </form>
     <div class="order-list-actions">
-      <div class="order-status-tabs" aria-label="订单状态筛选"><button v-for="item in statuses" :key="item" :class="{ active: status === item }" :aria-pressed="status === item" @click="status = item">{{ item }}</button></div>
+      <div class="order-status-tabs" aria-label="订单状态筛选"><button v-for="item in statuses" :key="item" :class="{ active: status === item }" :aria-pressed="status === item" @click="status = item"><span class="order-tab-label">{{ item }}<span v-if="item==='待报价'&&pendingQuoteCount>0" class="order-tab-notice" :aria-label="`有 ${pendingQuoteCount} 笔待报价订单`"></span></span></button></div>
       <div class="order-toolbar-buttons"><button class="plain-button" @click="resetFilters">重置过滤条件</button><RouterLink class="mint-button" :to="{ name: 'create-order' }">新建订单</RouterLink></div>
     </div>
     <div class="order-table-scroll">
