@@ -139,33 +139,39 @@ it('列表按待报价筛选，轮询移出已报价记录，待付款筛选可�
   expect(view.get('.quote-list-info').text()).toContain('含配送费')
 })
 
-it('待审核红点独立于日期筛选，审核完成后随刷新消失', async () => {
-  const awaitingReview: TimelyOrder = { ...quoted, payment: { status: 'paid' }, review: { status: 'pending' } }
-  let reviewOrders = [awaitingReview]
+it('待收款确认红点独立于日期筛选，确认到账后随刷新消失', async () => {
+  const awaitingReceipt: TimelyOrder = { ...quoted, payment: { status: 'submitted' } }
+  let receiptOrders = [awaitingReceipt]
   mocks.list.mockImplementation(async ({ stage, date }) => {
-    const orders = !date && stage === '已收款待审核' ? reviewOrders : []
+    const orders = !date && stage === '待收款确认' ? receiptOrders : []
     return { orders, total: orders.length, requiresQuote: true }
   })
   const view = render(OrdersView)
   await flushPromises()
   const tabs = view.findAll('.order-status-tabs button')
-  const reviewTab = tabs.find(button => button.text() === '已收款待审核')!
-  expect(tabs.some(button => button.text() === '审核通过待建单')).toBe(false)
+  const receiptTab = tabs.find(button => button.text() === '待收款确认')!
+  expect(tabs.some(button => button.text().includes('审核'))).toBe(false)
   expect(view.find('.table-link').exists()).toBe(false)
-  expect(mocks.list).toHaveBeenCalledWith({ stage: '已收款待审核', page: 1, pageSize: 1 })
-  expect(reviewTab.find('.order-tab-notice').exists()).toBe(true)
+  expect(mocks.list).toHaveBeenCalledWith({ stage: '待收款确认', page: 1, pageSize: 1 })
+  expect(receiptTab.find('.order-tab-notice').exists()).toBe(true)
 
-  reviewOrders = []
+  receiptOrders = []
   await vi.advanceTimersByTimeAsync(15000)
   await flushPromises()
-  expect(reviewTab.find('.order-tab-notice').exists()).toBe(false)
+  expect(receiptTab.find('.order-tab-notice').exists()).toBe(false)
 })
 
-it('审核通过后详情展示自动建单进度、异常和最终履约订单', async () => {
+it('确认到账后详情展示自动建单进度、异常和最终履约订单', async () => {
   const approved: TimelyOrder = { ...quoted, payment: { status: 'paid' }, review: { status: 'approved' }, external: { status: 'queued' } }
-  mocks.get.mockResolvedValue(approved)
+  mocks.get.mockResolvedValue({ ...quoted, payment: { status: 'submitted' } })
   const view = render(OrderDetailView)
   await flushPromises()
+  expect(view.get('.order-flow [aria-current="step"]').text()).toContain('确认到账')
+  expect(view.get('.order-state-pill').text()).toBe('待收款确认')
+
+  mocks.get.mockResolvedValue(approved)
+  await vi.advanceTimersByTimeAsync(15000)
+  expect(view.get('.order-flow [aria-current="step"]').text()).toContain('自动建单')
   expect(view.get('.order-state-pill').text()).toBe('自动建单中')
 
   mocks.get.mockResolvedValue({ ...approved, external: { status: 'attention', message: '建单结果待核对' } })
@@ -177,6 +183,19 @@ it('审核通过后详情展示自动建单进度、异常和最终履约订单'
   await vi.advanceTimersByTimeAsync(15000)
   expect(view.get('.order-state-pill').text()).toBe('待履约')
   expect(view.get('.fulfillment-card').text()).toContain('fulfillment-1')
+})
+
+it.each([
+  [{ status: 'pending' }, '建单异常', '请联系管理端继续建单'],
+  [{ status: 'rejected', reason: '原处理备注' }, '已停止履约', '原处理备注'],
+] as const)('历史已收款订单保留处理提示（%j）', async (review, label, message) => {
+  const historical: TimelyOrder = { ...quoted, payment: { status: 'paid' }, review }
+  mocks.get.mockResolvedValue(historical)
+  const view = render(OrderDetailView)
+  await flushPromises()
+  expect(view.get('.order-state-pill').text()).toBe(label)
+  expect(view.get('.fulfillment-card').text()).toContain(message)
+  expect(view.find('.manual-payment-form').exists()).toBe(false)
 })
 
 it.each([false, undefined])('列表以接口能力保留待报价筛选（requiresQuote=%s），不额外请求目录', async requiresQuote => {
