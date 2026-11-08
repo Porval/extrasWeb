@@ -6,7 +6,7 @@ const api=vi.hoisted(()=>({options:vi.fn(),products:vi.fn(),create:vi.fn()}))
 vi.mock('../src/api/orders',()=>({orderApi:api}))
 vi.mock('vue-router',()=>({useRouter:()=>({replace:vi.fn()})}))
 let wrapper:ReturnType<typeof mount>
-beforeEach(()=>{vi.clearAllMocks();auth.session.value={account:{id:'member',providerName:'渠道',personName:'人员',mobile:'13800138000',role:'member',enabled:true},expiresAt:Date.now()+100000};api.options.mockResolvedValue({demo:false,cities:[{id:'city',name:'上海'}],brands:[{id:'brand',name:'品牌'}],platforms:[{id:'platform',name:'服务商对应平台'}]});api.products.mockResolvedValue({products:[{id:'catalog',name:'测试洁面',upc:'001234567890',spec:'20ml',price:1234,brandName:'品牌',imageUrl:'https://cdn.example/product.jpg'}],page:1,hasMore:false})})
+beforeEach(()=>{vi.clearAllMocks();auth.session.value={account:{id:'member',providerName:'渠道',personName:'人员',mobile:'13800138000',role:'member',enabled:true},expiresAt:Date.now()+100000};api.options.mockResolvedValue({demo:false,requiresQuote:true,cities:[{id:'city',name:'上海'}],brands:[{id:'brand',name:'品牌'}],platforms:[{id:'platform',name:'服务商对应平台'}]});api.products.mockResolvedValue({products:[{id:'catalog',name:'测试洁面',upc:'001234567890',spec:'20ml',price:1234,brandName:'品牌',imageUrl:'https://cdn.example/product.jpg'}],page:1,hasMore:false})})
 afterEach(()=>wrapper?.unmount())
 describe('商品库选品',()=>{it('按 UPC 搜索后带入商品，参考价保持分到元转换，再次选择增加数量',async()=>{
   wrapper=mount(CreateOrderView,{global:{stubs:{RouterLink:true}}});await flushPromises()
@@ -38,7 +38,7 @@ it('外部订单号留空可提交，加入商品后的价格及目录快照保�
   await wrapper.get('[aria-label="城市"]').setValue('city');await wrapper.get('[aria-label="品牌"]').setValue('brand')
   await wrapper.get('.product-results button').trigger('click')
   await wrapper.get('[aria-label="收件信息"]').setValue('收件人和完整地址')
-  await wrapper.get('[aria-label="订单应付金额"]').setValue('12.34')
+  expect(wrapper.find('[aria-label="订单应付金额"]').exists()).toBe(false)
   expect(wrapper.get('.items-table .order-product-thumbnail img').attributes('src')).toBe('https://cdn.example/product.jpg')
   expect((wrapper.get('[aria-label="外部订单号"]').element as HTMLInputElement).value).toBe('')
   await wrapper.get('form').trigger('submit');await flushPromises()

@@ -5,9 +5,10 @@ afterEach(()=>vi.unstubAllGlobals())
 describe('持久化订单接口',()=>{
   it('建单携带幂等编号，身份由服务端返回；手动付款提交不会在客户端改为已收款',async()=>{
     const fetcher=vi.fn().mockResolvedValue({ok:true,status:200,json:async()=>({order:saved})});vi.stubGlobal('fetch',fetcher)
-    const input={cityId:'city',cityName:'上海',brandId:'brand',brandName:'品牌',plateId:'plate',platformName:'平台',items:[],contacts:'测试',messages:'',referenceId:'order',payPrice:100,arrivedTime:30}
+    const input={cityId:'city',cityName:'上海',brandId:'brand',brandName:'品牌',plateId:'plate',platformName:'平台',items:[],contacts:'测试',messages:'',referenceId:'order',arrivedTime:30}
     await orderApi.create(input,'idempotent-key')
     expect(fetcher.mock.calls[0]?.[1].headers['Idempotency-Key']).toBe('idempotent-key')
+    expect(JSON.parse(fetcher.mock.calls[0]?.[1].body)).not.toHaveProperty('payPrice')
     const result=await orderApi.manualPayment(saved.id,{reference:'BANK-001',description:'手动付款',screenshot:{contentType:'image/png',data:'test-base64'}})
     expect(fetcher.mock.calls[1]?.[0]).toBe('/api/orders/saved-order/manual-payment')
     expect(result.payment.status).toBe('submitted');expect(result.external.status).toBe('not_created')

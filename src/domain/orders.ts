@@ -13,7 +13,6 @@ export interface NewOrder {
   contacts: string
   messages: string
   referenceId: string
-  payPrice?: number
   arrivedTime: number
 }
 export type FulfillmentStatus = 'not_started' | 'waiting' | 'accepted' | 'delivering' | 'delivered'

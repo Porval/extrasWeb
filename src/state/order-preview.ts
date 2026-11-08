@@ -21,7 +21,7 @@ function ownedOrder(id: string) {
   if (!order) throw new Error('订单不存在或不属于当前登录账号。')
   return { order, account }
 }
-export function addPreviewOrder(input: NewOrder) {
+export function addPreviewOrder(input: NewOrder & { payPrice?: number }) {
   const account = auth.session.value?.account
   if (!account) throw new Error('请先登录。')
   const name = (key: keyof OrderOptions, id: string) => previewOptions[key].find(option => option.id === id)?.name || ''

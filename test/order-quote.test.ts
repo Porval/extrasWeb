@@ -52,20 +52,20 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function fillCreation(view: ReturnType<typeof mount>, priceLabel: string) {
+async function fillCreation(view: ReturnType<typeof mount>) {
   await view.get('[aria-label="城市"]').setValue('city')
   await view.get('[aria-label="品牌"]').setValue('brand')
   await view.get('[aria-label="商品 1 名称"]').setValue('测试商品')
-  await view.get(`[aria-label="${priceLabel}"]`).setValue('10.00')
+  await view.get('[aria-label="商品 1 商品原价"]').setValue('10.00')
   await view.get('[aria-label="收件信息"]').setValue('测试收件地址')
 }
 
-it('启用报价时可不填整单金额，保留商品参考单价并进入待报价订单详情', async () => {
+it('建单只提交商品原价等订单资料并进入待报价订单详情', async () => {
   const view = render(CreateOrderView)
   await flushPromises()
   expect(view.find('[aria-label="订单应付金额"]').exists()).toBe(false)
   expect(view.get('button[type="submit"]').text()).toBe('提交订单，等待报价')
-  await fillCreation(view, '商品 1 商品原价')
+  await fillCreation(view)
   await view.get('form').trigger('submit')
   await flushPromises()
   expect(mocks.create).toHaveBeenCalledOnce()
@@ -74,17 +74,17 @@ it('启用报价时可不填整单金额，保留商品参考单价并进入待�
   expect(mocks.replace).toHaveBeenCalledWith({ name: 'order-detail', params: { id: pending.id } })
 })
 
-it.each([undefined, false])('后台报价开关为 %s 时仍要求整单金额，旧建单行为不变', async requiresQuote => {
+it.each([undefined, false])('后台报价开关为 %s 时显示提示并拦截建单', async requiresQuote => {
   mocks.options.mockResolvedValue({ ...catalog, ...(requiresQuote === undefined ? {} : { requiresQuote }) })
   const view = render(CreateOrderView)
   await flushPromises()
-  await fillCreation(view, '商品 1 商品原价')
-  await view.get('form').trigger('submit')
-  expect(mocks.create).not.toHaveBeenCalled()
-  await view.get('[aria-label="订单应付金额"]').setValue('12.34')
+  expect(view.find('[aria-label="订单应付金额"]').exists()).toBe(false)
+  expect(view.get('[role="alert"]').text()).toContain('管理端报价功能尚未启用')
+  expect(view.get('button[type="submit"]').attributes('disabled')).toBeDefined()
+  await fillCreation(view)
   await view.get('form').trigger('submit')
   await flushPromises()
-  expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({ payPrice: 1234 }), expect.any(String))
+  expect(mocks.create).not.toHaveBeenCalled()
 })
 
 it('待报价详情不显示零元或付款入口，轮询收到报价后可提交原付款资料', async () => {
