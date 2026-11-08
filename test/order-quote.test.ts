@@ -123,6 +123,7 @@ it('列表按待报价筛选，轮询移出已报价记录，待付款筛选可�
   expect(view.get('.table-link').text()).toBe('查看订单')
   expect(view.get('.order-table tbody').text()).not.toContain('¥0.00')
   const tab = (label: string) => view.findAll('.order-status-tabs button').find(button => button.text() === label)!
+  expect(tab('待报价').find('.order-tab-notice').exists()).toBe(true)
   await tab('待报价').trigger('click')
   await flushPromises()
   expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ stage: '待报价' }))
@@ -130,11 +131,52 @@ it('列表按待报价筛选，轮询移出已报价记录，待付款筛选可�
   await vi.advanceTimersByTimeAsync(15000)
   await flushPromises()
   expect(view.find('.table-link').exists()).toBe(false)
+  expect(tab('待报价').find('.order-tab-notice').exists()).toBe(false)
   await tab('待付款').trigger('click')
   await flushPromises()
   expect(view.get('.table-link').text()).toBe('查看报价并付款')
   expect(view.get('.order-table tbody').text()).toContain('¥25.88')
   expect(view.get('.quote-list-info').text()).toContain('含配送费')
+})
+
+it('待审核红点独立于日期筛选，审核完成后随刷新消失', async () => {
+  const awaitingReview: TimelyOrder = { ...quoted, payment: { status: 'paid' }, review: { status: 'pending' } }
+  let reviewOrders = [awaitingReview]
+  mocks.list.mockImplementation(async ({ stage, date }) => {
+    const orders = !date && stage === '已收款待审核' ? reviewOrders : []
+    return { orders, total: orders.length, requiresQuote: true }
+  })
+  const view = render(OrdersView)
+  await flushPromises()
+  const tabs = view.findAll('.order-status-tabs button')
+  const reviewTab = tabs.find(button => button.text() === '已收款待审核')!
+  expect(tabs.some(button => button.text() === '审核通过待建单')).toBe(false)
+  expect(view.find('.table-link').exists()).toBe(false)
+  expect(mocks.list).toHaveBeenCalledWith({ stage: '已收款待审核', page: 1, pageSize: 1 })
+  expect(reviewTab.find('.order-tab-notice').exists()).toBe(true)
+
+  reviewOrders = []
+  await vi.advanceTimersByTimeAsync(15000)
+  await flushPromises()
+  expect(reviewTab.find('.order-tab-notice').exists()).toBe(false)
+})
+
+it('审核通过后详情展示自动建单进度、异常和最终履约订单', async () => {
+  const approved: TimelyOrder = { ...quoted, payment: { status: 'paid' }, review: { status: 'approved' }, external: { status: 'queued' } }
+  mocks.get.mockResolvedValue(approved)
+  const view = render(OrderDetailView)
+  await flushPromises()
+  expect(view.get('.order-state-pill').text()).toBe('自动建单中')
+
+  mocks.get.mockResolvedValue({ ...approved, external: { status: 'attention', message: '建单结果待核对' } })
+  await vi.advanceTimersByTimeAsync(15000)
+  expect(view.get('.order-state-pill').text()).toBe('建单异常')
+  expect(view.get('.fulfillment-card').text()).toContain('建单结果待核对')
+
+  mocks.get.mockResolvedValue({ ...approved, external: { status: 'created', timelyOrderId: 'fulfillment-1' }, fulfillment: { status: 'waiting' } })
+  await vi.advanceTimersByTimeAsync(15000)
+  expect(view.get('.order-state-pill').text()).toBe('待履约')
+  expect(view.get('.fulfillment-card').text()).toContain('fulfillment-1')
 })
 
 it.each([false, undefined])('列表以接口能力保留待报价筛选（requiresQuote=%s），不额外请求目录', async requiresQuote => {
