@@ -5,7 +5,7 @@ import ProductThumbnail from '../components/ProductThumbnail.vue'
 import FulfillmentInfo from '../components/FulfillmentInfo.vue'
 import { orderApi } from '../api/orders'
 import { money } from '../domain/order-form'
-import { fulfillmentCreation, fulfillmentLabels, orderStage } from '../domain/orders'
+import { fulfillmentCreation, fulfillmentLabels, orderStage, orderStageLabel, refundStatusLabels } from '../domain/orders'
 import type { TimelyOrder } from '../domain/orders'
 function localDate(value:number){const date=new Date(value);return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`}
 const today=localDate(Date.now())
@@ -85,7 +85,10 @@ const date=(value:number)=>new Date(value).toLocaleString('zh-CN',{hour12:false}
       <table class="order-table"><thead><tr><th>服务商 / 人员</th><th>订单进度</th><th>收款状态</th><th>商品</th><th>应付金额</th><th>收件信息</th><th>外部订单号</th><th>履约订单号 / 状态</th><th>创建时间</th><th>操作</th></tr></thead>
         <tbody><tr v-for="order in shown" :key="order.id">
           <td>{{ order.providerName }}<br><span>{{ order.operatorName }}</span></td>
-          <td><span class="order-state-pill" :class="{returned:order.payment.status==='unpaid'&&order.payment.rejection}">{{ orderStage(order) }}</span></td>
+          <td>
+            <span class="order-state-pill" :class="{returned:order.payment.status==='unpaid'&&order.payment.rejection}">{{ orderStageLabel(orderStage(order)) }}</span>
+            <div v-if="order.refund" class="quote-list-info">{{ refundStatusLabels[order.refund.status] }}</div>
+          </td>
           <td>
             <span v-if="order.quote?.status === 'pending'">等待管理端报价</span>
             <template v-else-if="order.payment.status === 'unpaid' && order.payment.rejection">
@@ -99,7 +102,7 @@ const date=(value:number)=>new Date(value).toLocaleString('zh-CN',{hour12:false}
           <td><template v-if="order.quote?.status==='pending'">—</template><template v-else>{{ money(order.payPrice) }}<div v-if="order.quote?.status==='quoted'" class="quote-list-info"><span>报价时间：{{date(order.quote.quotedAt)}}</span><p v-if="order.quote.note">{{order.quote.note}}</p></div></template></td><td class="contacts-cell">{{ order.contacts }}</td><td>{{ order.referenceId || '—' }}</td>
           <td>
             <template v-if="order.external.status === 'created'">
-              {{ order.external.timelyOrderId }}<br><span>{{ orderStage(order) }}</span>
+              {{ order.external.timelyOrderId }}<br><span>{{ orderStageLabel(orderStage(order)) }}</span>
               <FulfillmentInfo :fulfillment="order.fulfillment" compact />
               <span v-if="order.fulfillment.syncMessage">{{ order.fulfillment.syncMessage }}</span>
             </template>

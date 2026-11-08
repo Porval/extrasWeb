@@ -67,3 +67,36 @@ it('商品图片加载失败有占位，未知品牌保留手动选择',async()=
   expect((wrapper.get('[aria-label="品牌"]').element as HTMLSelectElement).value).toBe('')
   expect(wrapper.get('.brand-selection-note').text()).toContain('手动确认')
 })
+
+it('新建订单隐藏价探和 Price Tag 品牌，选择这类商品时保留手动确认的品牌', async () => {
+  api.options.mockResolvedValueOnce({
+    demo: false, cities: [{ id: 'city', name: '上海' }], platforms: [{ id: 'platform', name: '平台' }],
+    brands: [
+      { id: 'zh', name: '价探直发' }, { id: 'en', name: 'pricetag/试用体验中心' },
+      { id: 'spaced', name: 'ＰＲＩＣＥ Tag' }, { id: 'allowed', name: '兰蔻' },
+    ],
+  })
+  api.products.mockResolvedValueOnce({ products: [
+    { id: 'catalog', name: '测试商品', upc: '', spec: '', price: 1234, brandId: 'en', brandName: 'PriceTag/试用体验中心' },
+  ], page: 1, hasMore: false })
+  wrapper = mount(CreateOrderView, { global: { stubs: { RouterLink: true } } })
+  await flushPromises()
+  const brand = wrapper.get('[aria-label="品牌"]')
+  expect(brand.findAll('option').map(option => option.text())).toEqual(['请选择品牌', '兰蔻'])
+  await brand.setValue('allowed')
+  await wrapper.get('.product-results button').trigger('click')
+  expect((brand.element as HTMLSelectElement).value).toBe('allowed')
+  expect(wrapper.get('.brand-selection-note').text()).toBe('请手动确认订单品牌。')
+})
+
+it('将多个关键词一起发送，候选扫描受限时显示缩小搜索范围的提示', async () => {
+  wrapper = mount(CreateOrderView, { global: { stubs: { RouterLink: true } } })
+  await flushPromises()
+  api.products.mockResolvedValueOnce({ products: [], page: 1, hasMore: false, limited: true })
+  await wrapper.get('#product-query').setValue('兰蔻 粉底液')
+  await wrapper.get('.product-search-row button').trigger('click')
+  await flushPromises()
+  expect(api.products).toHaveBeenLastCalledWith('兰蔻 粉底液', 1)
+  expect(wrapper.text()).toContain('候选商品较多')
+  expect(wrapper.text()).not.toContain('未找到匹配商品')
+})

@@ -21,9 +21,27 @@ export type OrderStage = '待报价' | '付款资料已退回' | '待付款' | '
 export interface OrderEvent { id: string; time: number; title: string; description: string }
 export interface PaymentRejection { noteId:string; reason:string; reviewerName:string; rejectedAt:number }
 export type OrderQuote = { status: 'pending' } | { status: 'quoted'; amount: number; note: string; quotedAt: number; quotedBy: string }
+export const refundStatusLabels = {
+  requested: '退款待处理',
+  mark_pending: '退款标识待核对',
+  awaiting_fulfillment: '待履约确认',
+  ready_to_refund: '待发起退款',
+  initiated: '已发起退款',
+} as const
+export interface OrderRefund {
+  id: string
+  status: keyof typeof refundStatusLabels
+  reason: string
+  requestedAt: number
+  markedAt?: number
+  confirmedAt?: number
+  initiatedAt?: number
+  message?: string
+}
 export interface TimelyOrder extends NewOrder {
   payPrice: number
   quote?: OrderQuote
+  refund?: OrderRefund
   id: string
   createdAt: number
   ownerId: string
@@ -38,6 +56,7 @@ export interface TimelyOrder extends NewOrder {
   fulfillment: FulfillmentState
   events: OrderEvent[]
 }
+export type ProviderOrderDetail = TimelyOrder & { canRequestRefund?: boolean }
 export const fulfillmentLabels = {
   not_started: '未开始', waiting: '待接单', accepted: '已接单', delivering: '配送中', delivered: '已完成',
 } as const satisfies Record<FulfillmentStatus, string>
@@ -64,4 +83,7 @@ export function orderStage(order: TimelyOrder): OrderStage {
   if (order.fulfillment.sourceCode === 8 || order.fulfillment.errorOrder) return '履约异常'
   if (order.fulfillment.hungup) return '已挂起'
   return order.fulfillment.status === 'not_started' ? '待接单' : fulfillmentLabels[order.fulfillment.status]
+}
+export function orderStageLabel(stage: OrderStage): string {
+  return stage === '已退款' ? '履约侧已退款' : stage
 }
