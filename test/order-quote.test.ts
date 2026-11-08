@@ -23,6 +23,7 @@ const pending: TimelyOrder = {
   external: { status: 'not_created' }, fulfillment: { status: 'not_started' }, events: [],
 }
 const quoted: TimelyOrder = { ...pending, payPrice: 2588, quote: { status: 'quoted', amount: 2588, note: '含配送费', quotedAt: 1794100002000, quotedBy: '报价人员' } }
+const fulfillmentStages = [['waiting', '待接单'], ['accepted', '已接单'], ['delivering', '配送中'], ['delivered', '已完成']] as const
 
 let wrapper: ReturnType<typeof mount> | undefined
 function render(view: typeof CreateOrderView | typeof OrderDetailView | typeof OrdersView) {
@@ -139,20 +140,22 @@ it('列表按待报价筛选，轮询移出已报价记录，待付款筛选可�
   expect(view.get('.quote-list-info').text()).toContain('含配送费')
 })
 
-it('待收款确认红点独立于日期筛选，确认到账后随刷新消失', async () => {
+it('付款待审核红点独立于日期筛选，确认到账后随刷新消失', async () => {
   const awaitingReceipt: TimelyOrder = { ...quoted, payment: { status: 'submitted' } }
   let receiptOrders = [awaitingReceipt]
   mocks.list.mockImplementation(async ({ stage, date }) => {
-    const orders = !date && stage === '待收款确认' ? receiptOrders : []
+    const orders = !date && stage === '付款待审核' ? receiptOrders : []
     return { orders, total: orders.length, requiresQuote: true }
   })
   const view = render(OrdersView)
   await flushPromises()
   const tabs = view.findAll('.order-status-tabs button')
-  const receiptTab = tabs.find(button => button.text() === '待收款确认')!
-  expect(tabs.some(button => button.text().includes('审核'))).toBe(false)
+  const receiptTab = tabs.find(button => button.text() === '付款待审核')!
+  expect(tabs.map(button => button.text())).toEqual([
+    '全部', '待报价', '待付款', '付款待审核', '待接单', '已接单', '配送中', '已完成', '履约异常', '已挂起', '已退款',
+  ])
   expect(view.find('.table-link').exists()).toBe(false)
-  expect(mocks.list).toHaveBeenCalledWith({ stage: '待收款确认', page: 1, pageSize: 1 })
+  expect(mocks.list).toHaveBeenCalledWith({ stage: '付款待审核', page: 1, pageSize: 1 })
   expect(receiptTab.find('.order-tab-notice').exists()).toBe(true)
 
   receiptOrders = []
@@ -161,13 +164,33 @@ it('待收款确认红点独立于日期筛选，确认到账后随刷新消失'
   expect(receiptTab.find('.order-tab-notice').exists()).toBe(false)
 })
 
+it('四个履约阶段独立请求并显示对应状态', async () => {
+  mocks.list.mockImplementation(async ({ stage }) => {
+    const match = fulfillmentStages.find(([, label]) => label === stage)
+    const orders = match ? [{ ...quoted, payment: { status: 'paid' }, review: { status: 'approved' },
+      external: { status: 'created', timelyOrderId: 'fulfillment-1' }, fulfillment: { status: match[0], sourceStatus: '平台状态' },
+    }] : []
+    return { orders, total: orders.length, requiresQuote: true }
+  })
+  const view = render(OrdersView)
+  await flushPromises()
+  const tabs = view.findAll('.order-status-tabs button')
+  for (const [, label] of fulfillmentStages) {
+    await tabs.find(button => button.text() === label)!.trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ stage: label }))
+    expect(view.get('.order-state-pill').text()).toBe(label)
+  }
+})
+
 it('确认到账后详情展示自动建单进度、异常和最终履约订单', async () => {
   const approved: TimelyOrder = { ...quoted, payment: { status: 'paid' }, review: { status: 'approved' }, external: { status: 'queued' } }
   mocks.get.mockResolvedValue({ ...quoted, payment: { status: 'submitted' } })
   const view = render(OrderDetailView)
   await flushPromises()
   expect(view.get('.order-flow [aria-current="step"]').text()).toContain('确认到账')
-  expect(view.get('.order-state-pill').text()).toBe('待收款确认')
+  expect(view.get('.order-state-pill').text()).toBe('付款待审核')
+  expect(view.get('.payment-card .detail-badge').text()).toBe('付款待审核')
 
   mocks.get.mockResolvedValue(approved)
   await vi.advanceTimersByTimeAsync(15000)
@@ -179,9 +202,12 @@ it('确认到账后详情展示自动建单进度、异常和最终履约订单'
   expect(view.get('.order-state-pill').text()).toBe('建单异常')
   expect(view.get('.fulfillment-card').text()).toContain('建单结果待核对')
 
-  mocks.get.mockResolvedValue({ ...approved, external: { status: 'created', timelyOrderId: 'fulfillment-1' }, fulfillment: { status: 'waiting' } })
-  await vi.advanceTimersByTimeAsync(15000)
-  expect(view.get('.order-state-pill').text()).toBe('待履约')
+  for (const [status, label] of fulfillmentStages) {
+    mocks.get.mockResolvedValue({ ...approved, external: { status: 'created', timelyOrderId: 'fulfillment-1' }, fulfillment: { status, sourceStatus: '平台状态' } })
+    await vi.advanceTimersByTimeAsync(15000)
+    expect(view.get('.order-state-pill').text()).toBe(label)
+    expect(view.get('.fulfillment-card .detail-badge').text()).toBe(label)
+  }
   expect(view.get('.fulfillment-card').text()).toContain('fulfillment-1')
 })
 

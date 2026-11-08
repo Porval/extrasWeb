@@ -14,6 +14,7 @@ const quotePending=computed(()=>order.value?.quote?.status==='pending')
 const canSubmitPayment=computed(()=>!quotePending.value&&(order.value?.payment.status==='unpaid'||(order.value?.payment.status==='submitted'&&!order.value.payment.screenshot)))
 const flowLabels=computed(()=>['手工建单',...(order.value?.quote?['管理端报价']:[]),'手动付款','确认到账','自动建单','查看履约'])
 const creation = computed(() => order.value && fulfillmentCreation(order.value))
+const currentStage = computed(() => order.value && orderStage(order.value))
 const paymentDraft=reactive({reference:'',description:''})
 const paymentDraftDirty=ref(false)
 const paymentReturned=computed(()=>order.value?.payment.status==='unpaid'&&Boolean(order.value.payment.rejection))
@@ -67,7 +68,7 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
     <p class="preview-note">{{order?.quote?'报价完成后，按报价金额手动付款并提交资料。':'手动付款后，请提交付款资料。'}}管理端确认到账后，系统自动创建履约订单。</p><p v-if="error" class="admin-error" role="alert">{{error}}</p>
     <template v-if="order">
       <ol class="order-flow" :class="{'has-quote':order.quote}" aria-label="订单处理流程"><li v-for="(label, index) in flowLabels" :key="label" :class="{ done: index < step, current: index === step }" :aria-current="index === step ? 'step' : undefined"><span>{{ index < step ? '✓' : index + 1 }}</span><strong>{{ label }}</strong></li></ol>
-      <div class="order-overview"><div><p class="detail-eyebrow">{{ order.providerName }} · {{ order.operatorName }}</p><h2>外部订单号 {{ order.referenceId || '未填写' }}</h2><p>结算订单号：{{ order.id }}</p></div><div class="order-amount"><span>订单应付金额</span><strong v-if="!quotePending">{{ money(order.payPrice) }}</strong><strong v-else>—</strong><span class="order-state-pill" :class="{returned:paymentReturned}">{{ orderStage(order) }}</span></div></div>
+      <div class="order-overview"><div><p class="detail-eyebrow">{{ order.providerName }} · {{ order.operatorName }}</p><h2>外部订单号 {{ order.referenceId || '未填写' }}</h2><p>结算订单号：{{ order.id }}</p></div><div class="order-amount"><span>订单应付金额</span><strong v-if="!quotePending">{{ money(order.payPrice) }}</strong><strong v-else>—</strong><span class="order-state-pill" :class="{returned:paymentReturned}">{{ currentStage }}</span></div></div>
 
       <section v-if="order.quote" class="detail-card quote-card" aria-label="管理端报价" aria-live="polite">
         <header><h2>管理端报价</h2><span class="detail-badge" :class="{complete:!quotePending}">{{quotePending?'待报价':'已报价'}}</span></header>
@@ -76,7 +77,7 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
       </section>
 
       <div v-if="!quotePending" class="detail-columns">
-        <section class="detail-card payment-card"><header><h2>手动付款信息</h2><span class="detail-badge" :class="{complete:order.payment.status==='paid',returned:paymentReturned}">{{paymentReturned?'付款资料已退回':order.payment.status==='paid'?'已确认到账':order.payment.status==='submitted'?'待收款确认':'待付款'}}</span></header>
+        <section class="detail-card payment-card"><header><h2>手动付款信息</h2><span class="detail-badge" :class="{complete:order.payment.status==='paid',returned:paymentReturned}">{{ order.payment.status === 'paid' ? '已确认到账' : currentStage }}</span></header>
           <dl class="detail-fields"><dt>服务商</dt><dd>{{order.providerName}}</dd><dt>建单人员</dt><dd>{{order.operatorName}}</dd><dt>付款人员</dt><dd>{{order.payment.payerName||auth.session.value?.account.personName}}</dd><dt>收款时间</dt><dd>{{date(order.payment.paidAt)}}</dd></dl>
           <div v-if="paymentReturned&&order.payment.rejection" class="payment-returned-notice" role="status">
             <strong>付款资料已退回</strong><p>退回原因：{{order.payment.rejection.reason}}</p>
@@ -101,11 +102,11 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
           <template v-else><dl class="detail-fields"><dt>付款流水号</dt><dd>{{order.payment.reference||'由管理端确认'}}</dd><dt>付款说明</dt><dd>{{order.payment.description||'无'}}</dd><dt>提交时间</dt><dd>{{date(order.payment.submittedAt)}}</dd></dl><a v-if="screenshotUrl" :href="screenshotUrl" target="_blank" rel="noopener" class="payment-screenshot-link"><img :src="screenshotUrl" alt="已提交的付款截图"><span>查看付款截图原图 ↗</span></a><p v-if="order.payment.status==='submitted'" class="review-pending" role="status">付款信息已提交，等待管理端核对到账。</p></template>
           <details v-if="order.payment.rejections?.length" class="payment-return-history"><summary>付款资料退回记录（{{order.payment.rejections.length}}）</summary><ol><li v-for="entry in order.payment.rejections" :key="entry.noteId"><strong>{{entry.reason}}</strong><span>{{entry.reviewerName}} · {{date(entry.rejectedAt)}}</span></li></ol></details>
         </section>
-        <section class="detail-card fulfillment-card"><header><h2>履约情况</h2><span class="detail-badge" :class="{ complete: order.fulfillment.status === 'delivered' }">{{ creation?.label || fulfillmentLabels[order.fulfillment.status] }}</span></header>
+        <section class="detail-card fulfillment-card"><header><h2>履约情况</h2><span class="detail-badge" :class="{ complete: currentStage === '已完成' }">{{ order.external.status === 'created' ? currentStage : creation?.label || fulfillmentLabels.not_started }}</span></header>
           <p v-if="order.external.status !== 'created'" class="fulfillment-empty">
             {{ creation?.message || '确认到账后，系统会自动创建履约订单并同步履约进度。' }}
           </p>
-          <template v-else><dl class="detail-fields"><dt>履约订单号</dt><dd>{{ order.external.timelyOrderId }}</dd><dt>当前状态</dt><dd>{{order.fulfillment.sourceStatus||fulfillmentLabels[order.fulfillment.status]}}</dd><dt>最近更新</dt><dd>{{ date(order.fulfillment.updatedAt) }}</dd><dt>最近同步</dt><dd>{{ date(order.fulfillment.syncedAt) }}</dd></dl><FulfillmentInfo :fulfillment="order.fulfillment"/><p class="detail-help">后台定时同步配送订单状态、履约备注及配送信息。</p><p v-if="order.fulfillment.syncMessage" class="detail-help">{{order.fulfillment.syncMessage}}</p><p v-if="order.fulfillment.status==='delivered'" class="fulfillment-complete" role="status">✓ 订单已送达。</p></template>
+          <template v-else><dl class="detail-fields"><dt>履约订单号</dt><dd>{{ order.external.timelyOrderId }}</dd><dt>当前状态</dt><dd>{{ currentStage }}</dd><dt>最近更新</dt><dd>{{ date(order.fulfillment.updatedAt) }}</dd><dt>最近同步</dt><dd>{{ date(order.fulfillment.syncedAt) }}</dd></dl><FulfillmentInfo :fulfillment="order.fulfillment"/><p class="detail-help">后台定时同步配送订单状态、履约备注及配送信息。</p><p v-if="order.fulfillment.syncMessage" class="detail-help">{{order.fulfillment.syncMessage}}</p><p v-if="currentStage === '已完成'" class="fulfillment-complete" role="status">✓ 订单已完成。</p></template>
         </section>
       </div>
       <section class="detail-card"><header><h2>订单信息</h2><span>{{ order.platformName }}</span></header><dl class="detail-fields order-info-fields"><dt>城市 / 品牌</dt><dd>{{ order.cityName }} / {{ order.brandName }}</dd><dt>收件信息</dt><dd>{{ order.contacts }}</dd><dt>用户备注</dt><dd>{{ order.messages || '无' }}</dd><dt>送达时限</dt><dd>{{ order.arrivedTime }} 分钟</dd><dt>创建时间</dt><dd>{{ date(order.createdAt) }}</dd></dl><ul class="detail-items"><li v-for="(item, index) in order.items" :key="index"><div class="order-item-identity"><ProductThumbnail :src="item.imageUrl" :name="item.itemName"/><div class="order-item-copy"><strong>{{ item.itemName }}</strong><span>{{ item.spec || '无规格' }}<template v-if="item.upc"> · UPC：{{item.upc}}</template></span></div></div><span>{{ order.quote ? '参考单价 ' : '' }}{{ money(item.salesPrice) }} × {{ item.quantity }}</span><strong>{{ money(item.salesPrice * item.quantity) }}</strong></li></ul></section>

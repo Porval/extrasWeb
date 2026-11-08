@@ -17,7 +17,7 @@ export interface NewOrder {
   arrivedTime: number
 }
 export type FulfillmentStatus = 'not_started' | 'waiting' | 'accepted' | 'delivering' | 'delivered'
-export type OrderStage = '待报价' | '付款资料已退回' | '待付款' | '待收款确认' | '已停止履约' | '自动建单中' | '建单异常' | '待履约' | '履约中' | '已完成' | '已退款' | '履约异常' | '已挂起'
+export type OrderStage = '待报价' | '付款资料已退回' | '待付款' | '付款待审核' | '已停止履约' | '自动建单中' | '建单异常' | '待接单' | '已接单' | '配送中' | '已完成' | '履约异常' | '已挂起' | '已退款'
 export interface OrderEvent { id: string; time: number; title: string; description: string }
 export interface PaymentRejection { noteId:string; reason:string; reviewerName:string; rejectedAt:number }
 export type OrderQuote = { status: 'pending' } | { status: 'quoted'; amount: number; note: string; quotedAt: number; quotedBy: string }
@@ -38,9 +38,9 @@ export interface TimelyOrder extends NewOrder {
   fulfillment: FulfillmentState
   events: OrderEvent[]
 }
-export const fulfillmentLabels: Record<FulfillmentStatus, string> = {
-  not_started: '未开始', waiting: '待接单', accepted: '已接单', delivering: '配送中', delivered: '已送达',
-}
+export const fulfillmentLabels = {
+  not_started: '未开始', waiting: '待接单', accepted: '已接单', delivering: '配送中', delivered: '已完成',
+} as const satisfies Record<FulfillmentStatus, string>
 export function fulfillmentCreation(order: TimelyOrder): { label: OrderStage; message: string } | undefined {
   if (order.payment.status !== 'paid' || order.external.status === 'created') return
   if (order.review.status === 'rejected') {
@@ -56,14 +56,12 @@ export function fulfillmentCreation(order: TimelyOrder): { label: OrderStage; me
 }
 export function orderStage(order: TimelyOrder): OrderStage {
   if (order.quote?.status === 'pending') return '待报价'
-  if (order.payment.status === 'submitted') return '待收款确认'
+  if (order.payment.status === 'submitted') return '付款待审核'
   if (order.payment.status === 'unpaid') return order.payment.rejection ? '付款资料已退回' : '待付款'
   const creation = fulfillmentCreation(order)
   if (creation) return creation.label
   if (order.fulfillment.sourceCode === 6) return '已退款'
   if (order.fulfillment.sourceCode === 8 || order.fulfillment.errorOrder) return '履约异常'
   if (order.fulfillment.hungup) return '已挂起'
-  if (order.fulfillment.status === 'delivered') return '已完成'
-  if (order.fulfillment.status === 'waiting') return '待履约'
-  return '履约中'
+  return order.fulfillment.status === 'not_started' ? '待接单' : fulfillmentLabels[order.fulfillment.status]
 }

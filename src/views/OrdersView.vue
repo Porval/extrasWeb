@@ -13,9 +13,13 @@ const filters=reactive({date:today,contacts:'',reference:'',item:''})
 const applied=ref({...filters})
 const status=ref('全部')
 const quoteSupported=ref(false)
-const noticeStages = ['待报价', '待收款确认'] as const
+const noticeStages = ['待报价', '付款待审核'] as const
 const pendingCounts = reactive<Partial<Record<string, number>>>({})
-const statuses=computed(()=>['全部',...(quoteSupported.value?['待报价']:[]),'待付款','待收款确认','待履约','履约中','已完成','已退款','履约异常','已挂起'])
+const statuses = computed(() => [
+  '全部', ...(quoteSupported.value ? ['待报价'] : []), '待付款', '付款待审核',
+  fulfillmentLabels.waiting, fulfillmentLabels.accepted, fulfillmentLabels.delivering, fulfillmentLabels.delivered,
+  '履约异常', '已挂起', '已退款',
+])
 const page=ref(1),pageSize=ref(10),shown=ref<TimelyOrder[]>([]),total=ref(0),loading=ref(false),error=ref('')
 const pages=computed(()=>Math.max(1,Math.ceil(total.value/pageSize.value)))
 let epoch=0,noticeEpoch=0,timer:ReturnType<typeof setInterval>|undefined
@@ -95,7 +99,7 @@ const date=(value:number)=>new Date(value).toLocaleString('zh-CN',{hour12:false}
           <td><template v-if="order.quote?.status==='pending'">—</template><template v-else>{{ money(order.payPrice) }}<div v-if="order.quote?.status==='quoted'" class="quote-list-info"><span>报价时间：{{date(order.quote.quotedAt)}}</span><p v-if="order.quote.note">{{order.quote.note}}</p></div></template></td><td class="contacts-cell">{{ order.contacts }}</td><td>{{ order.referenceId || '—' }}</td>
           <td>
             <template v-if="order.external.status === 'created'">
-              {{ order.external.timelyOrderId }}<br><span>{{ order.fulfillment.sourceStatus || fulfillmentLabels[order.fulfillment.status] }}</span>
+              {{ order.external.timelyOrderId }}<br><span>{{ orderStage(order) }}</span>
               <FulfillmentInfo :fulfillment="order.fulfillment" compact />
               <span v-if="order.fulfillment.syncMessage">{{ order.fulfillment.syncMessage }}</span>
             </template>

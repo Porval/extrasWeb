@@ -14,8 +14,8 @@ describe('持久化订单接口',()=>{
   })
   it('查询包含服务端筛选和分页，异常订单响应明确报错',async()=>{
     const fetcher=vi.fn().mockResolvedValueOnce({ok:true,status:200,json:async()=>({orders:[],total:0})}).mockResolvedValueOnce({ok:true,status:200,json:async()=>({order:{id:'broken'}})});vi.stubGlobal('fetch',fetcher)
-    await orderApi.list({stage:'待收款确认',page:2,pageSize:10})
-    const url=new URL(fetcher.mock.calls[0]?.[0],'http://localhost');expect(url.searchParams.get('page')).toBe('2');expect(url.searchParams.get('stage')).toBe('待收款确认')
+    await orderApi.list({stage:'付款待审核',page:2,pageSize:10})
+    const url=new URL(fetcher.mock.calls[0]?.[0],'http://localhost');expect(url.searchParams.get('page')).toBe('2');expect(url.searchParams.get('stage')).toBe('付款待审核')
     await expect(orderApi.get('broken')).rejects.toThrow('订单响应异常')
   })
   it('保留列表报价能力与报价详情，拒绝报价和实付金额不一致的响应',async()=>{
