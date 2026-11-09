@@ -41,3 +41,31 @@ it('提交失败停留详情，保留流水号、付款说明及截图，允许�
   expect(wrapper.get('.payment-screenshot-link img').attributes('src')).toBe('blob:payment-proof')
   expect(wrapper.get('.manual-payment-form button').attributes('disabled')).toBeUndefined()
 })
+it('付款流水号可留空，拖入微信图片文件即可提交必填截图', async () => {
+  mocks.manualPayment.mockImplementation(async () => ({ ...await mocks.get(), payment: { status: 'submitted', screenshot: { id: 'proof' } } }))
+  wrapper = mount(OrderDetailView, { attachTo: document.body, global: { stubs: { RouterLink: true } } })
+  await flushPromises()
+  expect(wrapper.get('.manual-payment-form').text()).toContain('付款流水号（选填）')
+  const submit = wrapper.get('.manual-payment-form button')
+  await submit.trigger('click')
+  expect(wrapper.get('[role="alert"]').text()).toContain('请上传付款截图')
+  expect(mocks.manualPayment).not.toHaveBeenCalled()
+
+  const dropZone = wrapper.get('.payment-screenshot-drop')
+  await dropZone.trigger('drop', { dataTransfer: { files: [], items: [{ kind: 'string', type: 'text/uri-list' }] } })
+  expect(wrapper.get('[role="alert"]').text()).toContain('请拖入付款截图文件')
+  expect(wrapper.find('.payment-screenshot-link img').exists()).toBe(false)
+
+  const screenshot = new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], '微信截图.PNG')
+  await dropZone.trigger('drop', {
+    dataTransfer: { files: [], items: [{ kind: 'file', getAsFile: () => screenshot }] },
+  })
+  expect(dropZone.text()).toContain('已选择 微信截图.PNG')
+  expect(wrapper.get('.payment-screenshot-link img').attributes('src')).toBe('blob:payment-proof')
+  await submit.trigger('click')
+  await vi.waitFor(() => expect(mocks.manualPayment).toHaveBeenCalledExactlyOnceWith('order', {
+    reference: '', description: '', screenshot: { contentType: 'image/png', data: 'iVBORw0KGgo=' },
+  }))
+  expect(mocks.replace).toHaveBeenCalledExactlyOnceWith({ name: 'orders' })
+  expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:payment-proof')
+})

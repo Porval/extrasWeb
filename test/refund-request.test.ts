@@ -86,13 +86,13 @@ it('提交中拦截重复请求，失败保留原因，同内容重试复用幂�
   expect(view.get('.order-state-pill').text()).toBe('待接单')
 })
 
-it('轮询区分履约侧退款、履约确认及款项退款发起进度', async () => {
+it('轮询更新独立退款进度，订单仍显示公开履约阶段', async () => {
   const refundedFulfillment = { ...order, fulfillment: { status: 'waiting', sourceCode: 6 } }
   fetcher.mockResolvedValueOnce(response({ order: { ...refundedFulfillment, refund: { ...refund, status: 'awaiting_fulfillment' } } }))
     .mockResolvedValueOnce(response({ order: { ...refundedFulfillment, refund: { ...refund, status: 'ready_to_refund', confirmedAt: 1700000000002 } } }))
     .mockResolvedValueOnce(response({ order: { ...refundedFulfillment, refund: { ...refund, status: 'initiated', initiatedAt: 1700000000003 } } }))
   const view = await detail()
-  expect(view.get('.order-state-pill').text()).toBe('履约侧已退款')
+  expect(view.get('.order-state-pill').text()).toBe('待接单')
   expect(view.get('.refund-card [role="status"]').text()).toBe('待履约确认')
   await vi.advanceTimersByTimeAsync(15000)
   expect(view.get('.refund-card [role="status"]').text()).toBe('待发起退款')

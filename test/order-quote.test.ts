@@ -152,7 +152,7 @@ it('付款待审核红点独立于日期筛选，确认到账后随刷新消失'
   const tabs = view.findAll('.order-status-tabs button')
   const receiptTab = tabs.find(button => button.text() === '付款待审核')!
   expect(tabs.map(button => button.text())).toEqual([
-    '全部', '待报价', '待付款', '付款待审核', '待接单', '已接单', '配送中', '已完成', '履约异常', '已挂起', '已退款',
+    '全部', '待报价', '待付款', '付款待审核', '待接单', '已接单', '配送中', '已完成',
   ])
   expect(view.find('.table-link').exists()).toBe(false)
   expect(mocks.list).toHaveBeenCalledWith({ stage: '付款待审核', page: 1, pageSize: 1 })
@@ -200,7 +200,8 @@ it('确认到账后详情展示自动建单进度、异常和最终履约订单'
   mocks.get.mockResolvedValue({ ...approved, external: { status: 'attention', message: '建单结果待核对' } })
   await vi.advanceTimersByTimeAsync(15000)
   expect(view.get('.order-state-pill').text()).toBe('建单异常')
-  expect(view.get('.fulfillment-card').text()).toContain('建单结果待核对')
+  expect(view.get('.fulfillment-card').text()).toContain('履约订单暂未建成，请联系管理端核实')
+  expect(view.get('.fulfillment-card').text()).not.toContain('建单结果待核对')
 
   for (const [status, label] of fulfillmentStages) {
     mocks.get.mockResolvedValue({ ...approved, external: { status: 'created', timelyOrderId: 'fulfillment-1' }, fulfillment: { status, sourceStatus: '平台状态' } })

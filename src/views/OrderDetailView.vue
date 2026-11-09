@@ -7,7 +7,7 @@ import FulfillmentInfo from '../components/FulfillmentInfo.vue'
 import { ApiError } from '../api/http'
 import { orderApi } from '../api/orders'
 import { money } from '../domain/order-form'
-import { fulfillmentCreation, fulfillmentLabels, orderStage, orderStageLabel, refundStatusLabels } from '../domain/orders'
+import { fulfillmentCreation, orderStage, providerOrderEvents, refundStatusLabels } from '../domain/orders'
 import { encodePaymentScreenshot, validatePaymentScreenshot } from '../domain/payment-screenshot'
 import type { ProviderOrderDetail } from '../domain/orders'
 const route=useRoute(),router=useRouter(),order=ref<ProviderOrderDetail>(),loading=ref(true),saving=ref(false),error=ref('')
@@ -16,7 +16,7 @@ const canSubmitPayment=computed(()=>!quotePending.value&&(order.value?.payment.s
 const flowLabels=computed(()=>['手工建单',...(order.value?.quote?['管理端报价']:[]),'手动付款','确认到账','自动建单','查看履约'])
 const creation = computed(() => order.value && fulfillmentCreation(order.value))
 const currentStage = computed(() => order.value && orderStage(order.value))
-const stageLabel = computed(() => currentStage.value && orderStageLabel(currentStage.value))
+const events = computed(() => order.value ? providerOrderEvents(order.value) : [])
 const canRequestRefund = computed(() => order.value?.canRequestRefund === true && !order.value.refund)
 const refundOpen = ref(false), refundReason = ref(''), refundError = ref('')
 let refundAttempt: { reason: string; key: string } | undefined
@@ -42,12 +42,41 @@ function acceptOrder(data:ProviderOrderDetail){
 const screenshotFile=ref<File>(),screenshotPreview=ref('')
 const screenshotUrl=computed(()=>order.value?.payment.screenshot ? `/api/orders/${encodeURIComponent(order.value.id)}/payment-screenshot` : '')
 function clearScreenshot(){if(screenshotPreview.value)URL.revokeObjectURL(screenshotPreview.value);screenshotPreview.value='';screenshotFile.value=undefined}
-function selectScreenshot(event:Event){
-  const input=event.target as HTMLInputElement,file=input.files?.[0]
-  if(!file)return
-  clearScreenshot()
-  try{validatePaymentScreenshot(file);markPaymentDraftEdited();screenshotFile.value=file;screenshotPreview.value=URL.createObjectURL(file);error.value=''}
-  catch(e){input.value='';error.value=e instanceof Error?e.message:'请选择有效图片'}
+function setScreenshot(file: File) {
+  if (saving.value) return
+  try {
+    const extension = !file.type && /\.(jpe?g|png|webp)$/i.exec(file.name)?.[1].toLowerCase()
+    if (extension) {
+      const contentType = extension === 'jpg' ? 'image/jpeg' : `image/${extension}`
+      file = new File([file], file.name, { type: contentType, lastModified: file.lastModified })
+    }
+    validatePaymentScreenshot(file)
+    const preview = URL.createObjectURL(file)
+    clearScreenshot()
+    markPaymentDraftEdited()
+    screenshotFile.value = file
+    screenshotPreview.value = preview
+    error.value = ''
+  } catch (failure) {
+    error.value = failure instanceof Error ? failure.message : '请选择有效图片。'
+  }
+}
+function selectScreenshot(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) setScreenshot(file)
+  input.value = ''
+}
+function dropScreenshot(event: DragEvent) {
+  if (saving.value || !event.dataTransfer) return
+  const transfer = event.dataTransfer
+  const files = transfer.files?.length ? Array.from(transfer.files) : Array.from(transfer.items ?? [])
+    .filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(file => file !== null)
+  if (files.length !== 1) {
+    error.value = files.length ? '请一次拖入一张付款截图。' : '请拖入付款截图文件，或点击选择文件。'
+    return
+  }
+  setScreenshot(files[0])
 }
 const step=computed(()=>{
   if (!order.value || quotePending.value) return 1
@@ -62,7 +91,6 @@ const date=(value?:number)=>value?new Date(value).toLocaleString('zh-CN',{hour12
 async function load(){const started=++epoch,owner=auth.session.value?.account.id;try{const data=await orderApi.get(String(route.params.id));if(started===epoch&&owner===auth.session.value?.account.id){acceptOrder(data);error.value=''}}catch(e){if(started===epoch)error.value=e instanceof Error?e.message:'订单读取失败'}finally{if(started===epoch)loading.value=false}}
 async function submitPayment(){
   if(!order.value||saving.value||!canSubmitPayment.value)return
-  if(!paymentDraft.reference.trim()){error.value='请填写手动付款流水号。';return}
   if(!screenshotFile.value){error.value=paymentReturned.value?'请重新选择付款截图后再提交。':'请上传付款截图。';return}
   const current=order.value,file=screenshotFile.value
   const input={reference:paymentDraft.reference.trim(),description:paymentDraft.description.trim(),...(paymentReturned.value?{previousNoteId:current.payment.rejection?.noteId||current.payment.noteId}: {})}
@@ -105,7 +133,7 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
     <p class="preview-note">{{order?.quote?'报价完成后，按报价金额手动付款并提交资料。':'手动付款后，请提交付款资料。'}}管理端确认到账后，系统自动创建履约订单。</p><p v-if="error" class="admin-error" role="alert">{{error}}</p>
     <template v-if="order">
       <ol class="order-flow" :class="{'has-quote':order.quote}" aria-label="订单处理流程"><li v-for="(label, index) in flowLabels" :key="label" :class="{ done: index < step, current: index === step }" :aria-current="index === step ? 'step' : undefined"><span>{{ index < step ? '✓' : index + 1 }}</span><strong>{{ label }}</strong></li></ol>
-      <div class="order-overview"><div><p class="detail-eyebrow">{{ order.providerName }} · {{ order.operatorName }}</p><h2>外部订单号 {{ order.referenceId || '未填写' }}</h2><p>结算订单号：{{ order.id }}</p></div><div class="order-amount"><span>订单应付金额</span><strong v-if="!quotePending">{{ money(order.payPrice) }}</strong><strong v-else>—</strong><span class="order-state-pill" :class="{returned:paymentReturned}">{{ stageLabel }}</span></div></div>
+      <div class="order-overview"><div><p class="detail-eyebrow">{{ order.providerName }} · {{ order.operatorName }}</p><h2>外部订单号 {{ order.referenceId || '未填写' }}</h2><p>结算订单号：{{ order.id }}</p></div><div class="order-amount"><span>订单应付金额</span><strong v-if="!quotePending">{{ money(order.payPrice) }}</strong><strong v-else>—</strong><span class="order-state-pill" :class="{returned:paymentReturned}">{{ currentStage }}</span></div></div>
 
       <section v-if="order.quote" class="detail-card quote-card" aria-label="管理端报价" aria-live="polite">
         <header><h2>管理端报价</h2><span class="detail-badge" :class="{complete:!quotePending}">{{quotePending?'待报价':'已报价'}}</span></header>
@@ -126,24 +154,28 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
             <dl class="detail-fields"><dt>付款流水号</dt><dd>{{order.payment.reference||'未填写'}}</dd><dt>付款说明</dt><dd>{{order.payment.description||'无'}}</dd><dt>提交时间</dt><dd>{{date(order.payment.submittedAt)}}</dd></dl>
             <a v-if="screenshotUrl" :href="screenshotUrl" target="_blank" rel="noopener" class="payment-screenshot-link"><img :src="screenshotUrl" alt="上次提交的付款截图（仅供核对）"><span>查看上次付款截图原图 ↗</span></a>
           </section>
-          <form v-if="canSubmitPayment" class="manual-payment-form" @submit.prevent="submitPayment">
+          <form v-if="canSubmitPayment" class="manual-payment-form" novalidate @submit.prevent="submitPayment">
             <p v-if="paymentReturned" class="detail-help">核对上次资料后，可修改流水号和说明，并重新选择清晰的付款截图。旧截图只作参考，不会用于本次重新提交。</p>
-            <p v-else class="detail-help">请按约定渠道手动付款<template v-if="order.quote">，金额以管理端报价为准</template>。付款后填写流水号并上传付款截图，供管理端核对。提交资料不会将订单标记为已收款。</p>
-            <label>付款流水号<input v-model="paymentDraft.reference" aria-label="付款流水号" maxlength="120" placeholder="填写银行或支付平台流水号" :readonly="order.payment.status==='submitted'" :disabled="saving" @input="markPaymentDraftEdited"></label>
-            <label>{{paymentReturned?'重新选择付款截图':'付款截图'}} <span class="required-mark">*</span><input type="file" required aria-label="付款截图" accept="image/jpeg,image/png,image/webp" :disabled="saving" @change="selectScreenshot"></label>
-            <p class="detail-help">支持 JPG、PNG、WebP，单张不超过 5 MB，请确保金额、时间和流水号清晰。</p>
+            <p v-else class="detail-help">请按约定渠道手动付款<template v-if="order.quote">，金额以管理端报价为准</template>。付款后上传截图，供管理端核对到账。</p>
+            <label>付款流水号（选填）<input v-model="paymentDraft.reference" aria-label="付款流水号" maxlength="120" placeholder="可填写银行或支付平台流水号" :readonly="order.payment.status==='submitted'" :disabled="saving" @input="markPaymentDraftEdited"></label>
+            <label class="payment-screenshot-drop" @dragover.prevent @drop.prevent.stop="dropScreenshot">
+              {{ paymentReturned ? '重新选择付款截图' : '付款截图' }} <span class="required-mark">*</span>
+              <span id="payment-screenshot-help" class="detail-help">可从微信或文件夹拖入一张图片，也可点击选择文件。支持 JPG、PNG、WebP，单张不超过 5 MB。请确保付款金额和时间清晰可见。</span>
+              <input type="file" required aria-label="付款截图" aria-describedby="payment-screenshot-help" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" :disabled="saving" @change="selectScreenshot">
+              <span v-if="screenshotFile" class="detail-help" role="status">已选择 {{ screenshotFile.name }}</span>
+            </label>
             <a v-if="screenshotPreview" :href="screenshotPreview" target="_blank" rel="noopener" class="payment-screenshot-link"><img :src="screenshotPreview" alt="待提交的付款截图预览"></a>
             <label>付款说明<textarea v-model="paymentDraft.description" aria-label="付款说明" maxlength="1000" rows="3" placeholder="选填" :readonly="order.payment.status==='submitted'" :disabled="saving" @input="markPaymentDraftEdited"></textarea></label>
             <button class="mint-button" type="submit" :disabled="saving">{{saving?'正在上传并提交…':paymentReturned?'重新提交付款资料':order.payment.status==='submitted'?'补充付款截图':'提交手动付款信息'}}</button>
           </form>
-          <template v-else><dl class="detail-fields"><dt>付款流水号</dt><dd>{{order.payment.reference||'由管理端确认'}}</dd><dt>付款说明</dt><dd>{{order.payment.description||'无'}}</dd><dt>提交时间</dt><dd>{{date(order.payment.submittedAt)}}</dd></dl><a v-if="screenshotUrl" :href="screenshotUrl" target="_blank" rel="noopener" class="payment-screenshot-link"><img :src="screenshotUrl" alt="已提交的付款截图"><span>查看付款截图原图 ↗</span></a><p v-if="order.payment.status==='submitted'" class="review-pending" role="status">付款信息已提交，等待管理端核对到账。</p></template>
+          <template v-else><dl class="detail-fields"><dt>付款流水号</dt><dd>{{order.payment.reference||'未填写'}}</dd><dt>付款说明</dt><dd>{{order.payment.description||'无'}}</dd><dt>提交时间</dt><dd>{{date(order.payment.submittedAt)}}</dd></dl><a v-if="screenshotUrl" :href="screenshotUrl" target="_blank" rel="noopener" class="payment-screenshot-link"><img :src="screenshotUrl" alt="已提交的付款截图"><span>查看付款截图原图 ↗</span></a><p v-if="order.payment.status==='submitted'" class="review-pending" role="status">付款信息已提交，等待管理端核对到账。</p></template>
           <details v-if="order.payment.rejections?.length" class="payment-return-history"><summary>付款资料退回记录（{{order.payment.rejections.length}}）</summary><ol><li v-for="entry in order.payment.rejections" :key="entry.noteId"><strong>{{entry.reason}}</strong><span>{{entry.reviewerName}} · {{date(entry.rejectedAt)}}</span></li></ol></details>
         </section>
-        <section class="detail-card fulfillment-card"><header><h2>履约情况</h2><span class="detail-badge" :class="{ complete: currentStage === '已完成' }">{{ order.external.status === 'created' ? stageLabel : creation?.label || fulfillmentLabels.not_started }}</span></header>
+        <section class="detail-card fulfillment-card"><header><h2>履约情况</h2><span v-if="order.external.status === 'created' || creation" class="detail-badge" :class="{ complete: currentStage === '已完成' }">{{ currentStage }}</span></header>
           <p v-if="order.external.status !== 'created'" class="fulfillment-empty">
             {{ creation?.message || '确认到账后，系统会自动创建履约订单并同步履约进度。' }}
           </p>
-          <template v-else><dl class="detail-fields"><dt>履约订单号</dt><dd>{{ order.external.timelyOrderId }}</dd><dt>当前状态</dt><dd>{{ stageLabel }}</dd><dt>最近更新</dt><dd>{{ date(order.fulfillment.updatedAt) }}</dd><dt>最近同步</dt><dd>{{ date(order.fulfillment.syncedAt) }}</dd></dl><FulfillmentInfo :fulfillment="order.fulfillment"/><p class="detail-help">后台定时同步配送订单状态、履约备注及配送信息。</p><p v-if="order.fulfillment.syncMessage" class="detail-help">{{order.fulfillment.syncMessage}}</p><p v-if="currentStage === '已完成'" class="fulfillment-complete" role="status">✓ 订单已完成。</p></template>
+          <template v-else><dl v-if="order.external.timelyOrderId" class="detail-fields"><dt>履约订单号</dt><dd>{{ order.external.timelyOrderId }}</dd></dl><FulfillmentInfo :fulfillment="order.fulfillment"/><p v-if="currentStage === '已完成'" class="fulfillment-complete" role="status">✓ 订单已完成。</p></template>
         </section>
       </div>
       <section v-if="canRequestRefund || order.refund || refundError" class="detail-card refund-card" aria-label="退款申请">
@@ -170,13 +202,21 @@ onUnmounted(()=>{epoch++;clearInterval(timer);clearScreenshot()})
         <p v-if="refundError" class="admin-error" role="alert">{{ refundError }}</p>
       </section>
       <section class="detail-card"><header><h2>订单信息</h2><span>{{ order.platformName }}</span></header><dl class="detail-fields order-info-fields"><dt>城市 / 品牌</dt><dd>{{ order.cityName }} / {{ order.brandName }}</dd><dt>收件信息</dt><dd>{{ order.contacts }}</dd><dt>用户备注</dt><dd>{{ order.messages || '无' }}</dd><dt>送达时限</dt><dd>{{ order.arrivedTime }} 分钟</dd><dt>创建时间</dt><dd>{{ date(order.createdAt) }}</dd></dl><ul class="detail-items"><li v-for="(item, index) in order.items" :key="index"><div class="order-item-identity"><ProductThumbnail :src="item.imageUrl" :name="item.itemName"/><div class="order-item-copy"><strong>{{ item.itemName }}</strong><span>{{ item.spec || '无规格' }}<template v-if="item.upc"> · UPC：{{item.upc}}</template></span></div></div><span>{{ order.quote ? '参考单价 ' : '' }}{{ money(item.salesPrice) }} × {{ item.quantity }}</span><strong>{{ money(item.salesPrice * item.quantity) }}</strong></li></ul></section>
-      <section class="detail-card event-card"><header><h2>订单进度记录</h2><span>后台订单记录</span></header><ol class="order-events"><li v-for="event in order.events" :key="event.id"><time>{{ date(event.time) }}</time><div><strong>{{ event.title }}</strong><p>{{ event.description }}</p></div></li></ol></section>
+      <section v-if="events.length" class="detail-card event-card"><header><h2>订单进度记录</h2></header><ol class="order-events"><li v-for="event in events" :key="event.id"><time>{{ date(event.time) }}</time><div><strong>{{ event.title }}</strong><p v-if="event.description">{{ event.description }}</p></div></li></ol></section>
     </template>
     <div v-else class="order-empty"><p>{{loading?'正在读取订单…':'当前账号下不存在此订单。'}}</p><RouterLink class="mint-button" :to="{ name: 'create-order' }">新建订单</RouterLink></div>
   </section>
 </template>
 
 <style scoped>
+.manual-payment-form .payment-screenshot-drop {
+  padding: 12px;
+  border: 1px dashed #95bfae;
+  border-radius: 4px;
+  background: #f7fbf9;
+}
+.payment-screenshot-drop:focus-within { outline: 2px solid #498f7e; outline-offset: 2px; }
+.payment-screenshot-drop .detail-help { display: block; margin-top: 6px; }
 .refund-request-form label {
   display: grid;
   gap: 7px;
